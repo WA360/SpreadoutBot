@@ -1,0 +1,51 @@
+# This is a basic workflow to help you get started with Actions
+name: CI/CD Workflow
+
+# Controls when the workflow will run
+on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  python:
+    name: Python CI/CD
+    runs-on: ec2
+    environment: JUNGLE_SECRET
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # - name: Set up python
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version: "3.12"
+
+      - name: Create .env file
+        run: |
+          echo "AWS_BUCKET=${{ secrets.AWS_BUCKET }}" >> .env 
+          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env 
+          echo "S3_ACCESS_KEY=${{ secrets.S3_ACCESS_KEY }}" >> .env 
+          echo "S3_SECRET_ACCESS_KEY=${{ secrets.S3_SECRET_ACCESS_KEY }}" >> .env
+          echo "BEDROCK_AWS_REGION=${{ secrets.BEDROCK_AWS_REGION }}" >> .env 
+          echo "BEDROCK_ACCESS_KEY=${{ secrets.BEDROCK_ACCESS_KEY }}" >> .env 
+          echo "BEDROCK_SECRET_ACCESS_KEY=${{ secrets.BEDROCK_SECRET_ACCESS_KEY }}" >> .env 
+          echo "HOST=${{ vars.HOST }}" >> .env 
+          cat .env
+
+      - name: docker Down
+        run: docker compose down
+
+      - name: docker remove image
+        run: docker rmi nmm_bot
+        continue-on-error: true
+
+      - name: docker up
+        run: docker compose up -d --build
+
+      - name: remove .env file
+        run: rm .env
+        continue-on-error: true

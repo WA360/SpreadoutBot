@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flask SSE Example</title>
+</head>
+<body>
+    <h1>Flask SSE Example</h1>
+    <button onclick="startStream()">Start Stream</button>
+    <div id="streamData"></div>
+
+    <script>
+        function startStream() {
+            // POST 요청으로 서버에 데이터 전송
+            fetch('http://localhost:3000/question/langchain', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ question: '홀로라이브에 대해서 설명해줘' })
+            })
+            .then((response) => {
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                const readChunk = () => {
+                    return reader.read().then(appendChunks);
+                };
+
+                const appendChunks = (result) => {
+                const chunk = decoder.decode(result.value || new Uint8Array(), {
+                    stream: !result.done,
+                });
+                const parseData = JSON.parse(chunk);
+                // 받아오는 data로 할 일
+
+                if (!result.done) {
+                    return readChunk();
+                }
+                };
+
+                return readChunk();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        }
+    </script>
+</body>
+</html>
