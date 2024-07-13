@@ -9,7 +9,8 @@ services:
       - "8100:3000"
     networks:
       - jungle_network
-
+    volumes:
+      - /home/ubuntu/db/pdfs:/app/pdfs
 networks:
   jungle_network:
     external: true
