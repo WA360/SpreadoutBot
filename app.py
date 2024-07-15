@@ -9,8 +9,29 @@ import os
 # bedrock chatbot 필요 라이브러리
 import boto3
 
-# langchain pdf 필요 라이브러리
-# pdf reader , pdf splitter
+# langchain buffer memory , langchain history 라이브러리
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain.memory import ConversationBufferMemory
+from langchain_core.chat_history import (
+    BaseChatMessageHistory,
+    InMemoryChatMessageHistory,
+)
+from operator import itemgetter
+from typing import List, Optional
+
+from langchain_core.documents import Document
+from langchain_core.messages import BaseMessage, AIMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.pydantic_v1 import BaseModel, Field
+from langchain_core.runnables import (
+    RunnableLambda,
+    ConfigurableFieldSpec,
+    RunnablePassthrough,
+)
+from langchain_community.chat_message_histories import ChatMessageHistory
+
+
+# langchain pdf reader , pdf splitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import CharacterTextSplitter
 
@@ -26,6 +47,11 @@ from langchain_core.messages import HumanMessage
 
 # langchain 리트리버 라이브러리
 from langchain.schema.runnable import RunnablePassthrough
+from langchain.chains import create_history_aware_retriever
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+
+from langchain_core.messages import AIMessage
 
 # chromadb
 from langchain_chroma import Chroma
@@ -48,12 +74,29 @@ database_client = None  # db 위치
 embedding = None  # 임베딩 방법
 llm = None  # llm
 retriever = None  # 검색기
+conversation = None  # 채팅 버퍼
+store = {}  # 채팅 기록?
+chat_memory = ConversationBufferMemory(human_prefix="Human", ai_prefix="Assistant")
+
 bedrock = boto3.client(
     service_name="bedrock-runtime",
     region_name=bedrock_region,
     aws_access_key_id=bedrock_access_key_id,
     aws_secret_access_key=bedrock_secret_access_key,
 )
+
+
+class InMemoryHistory(BaseChatMessageHistory, BaseModel):
+    """In memory implementation of chat message history."""
+
+    messages: List[BaseMessage] = Field(default_factory=list)
+
+    def add_messages(self, messages: List[BaseMessage]) -> None:
+        """Add a list of messages to the store"""
+        self.messages.extend(messages)
+
+    def clear(self) -> None:
+        self.messages = []
 
 
 # 기본 세팅
@@ -74,8 +117,8 @@ def setDB(loc):
         )
     elif loc == "server":
         database_client = chromadb.HttpClient(
-            # host="localhost",
-            host="host.docker.internal",
+            host="localhost",
+            # host="host.docker.internal",
             port=8000,
             ssl=False,
             headers=None,
@@ -118,6 +161,23 @@ def setLLM():
     )
 
 
+# def get_session_history(user_id: str, conversation_id: str) -> BaseChatMessageHistory:
+#     if (user_id, conversation_id) not in store:
+#         store[(user_id, conversation_id)] = InMemoryHistory()
+#     return store[(user_id, conversation_id)]
+
+# def get_by_session_id(session_id: str) -> BaseChatMessageHistory:
+#     if session_id not in store:
+#         store[session_id] = InMemoryHistory()
+#     return store[session_id]
+
+
+# def get_session_history(session_id: str) -> BaseChatMessageHistory:
+#     if session_id not in store:
+#         store[session_id] = InMemoryChatMessageHistory()
+#     return store[session_id]
+
+
 @app.route("/save/pdf", methods=["POST"])
 def setPdf():
     data = request.get_json()
@@ -144,9 +204,10 @@ def setPdf():
     # pdf load
     is_file = check_file_exists_in_pdfs(fileName)
     if is_file:
+        print("파일 다운로드 완료!")
         collection_name = f"{fileNum}_{fileName}"
         documents = PyPDFLoader(download_path).load_and_split()
-        text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
+        text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         docs = text_splitter.split_documents(documents)
 
         chroma_db = Chroma(
@@ -154,7 +215,7 @@ def setPdf():
             collection_name=collection_name,
             embedding_function=embedding,
         )
-        # print(f"{chroma_db._collection.count()}개 있음")
+        print(f"{chroma_db._collection.count()}개 있음")
         if chroma_db._collection.count() == 0:
             # save to disk
             Chroma.from_documents(
@@ -172,59 +233,61 @@ def setPdf():
         return jsonify({"result": "파일 없음, 다운로드실패?"})
 
 
-@app.route("/question/langchain", methods=["POST"])
-def sendQuestionBylangchain():
-    data = request.get_json()
-    fileName = data["fileName"]
-    fileNum = data["fileNum"]
-    collection_name = f"{fileNum}_{fileName}"
-    userQuestion = data["question"]
-    print(userQuestion)
-    # load from disk
-    chroma_db = Chroma(
-        client=database_client,
-        collection_name=collection_name,
-        embedding_function=embedding,
-    )
-    # docs = chroma_db.similarity_search(question, k=2)
-    # print(docs)
-    retriever = chroma_db.as_retriever(search_kwargs={"k": 30})
+# @app.route("/question/langchain", methods=["POST"])
+# def sendQuestionBylangchain():
+#     data = request.get_json()
+#     fileName = data["fileName"]
+#     fileNum = data["fileNum"]
+#     collection_name = f"{fileNum}_{fileName}"
+#     userQuestion = data["question"]
+#     print(userQuestion)
+#     # load from disk
+#     chroma_db = Chroma(
+#         client=database_client,
+#         collection_name=collection_name,
+#         embedding_function=embedding,
+#     )
+#     # docs = chroma_db.similarity_search(question, k=2)
+#     # print(docs)
+#     retriever = chroma_db.as_retriever(search_kwargs={"k": 30})
 
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                """
-                You are a helpful assistant.
-                Answer questions using only the following context.
-                If you don't know the answer just say you don't know,
-                don't makel it up:
-                \n\n
-                {context}
-                """,
-            ),
-            ("human", "{question}"),
-        ]
-    )
+#     prompt = ChatPromptTemplate.from_messages(
+#         [
+#             (
+#                 "system",
+#                 """
+#                 You are a helpful assistant.
+#                 Answer questions using only the following context.
+#                 If you don't know the answer just say you don't know,
+#                 don't makel it up:
+#                 \n\n
+#                 {context}
+#                 """,
+#             ),
+#             ("human", "{question}"),
+#         ]
+#     )
 
-    chain = (
-        {
-            "context": retriever,
-            "question": RunnablePassthrough(),
-        }
-        | prompt
-        | llm
-    )
+#     chain = (
+#         {
+#             "context": retriever,
+#             "question": RunnablePassthrough(),
+#         }
+#         | prompt
+#         | llm
+#     )
 
-    result = chain.invoke(userQuestion)
-    return jsonify({"result": result.content})
-    # def generate():
-    #     # messages = [HumanMessage(content=userQuestion)]
-    #     for chunk in chain.stream(userQuestion):
-    #         # yield f"{chunk.content}\n"
-    #         yield chunk.content
-    #         # print(chunk.content, end="|", flush=True)
-    # return Response(stream_with_context(generate()), content_type="text/event-stream")
+#     result = chain.invoke(userQuestion)
+
+#     return jsonify({"result": f"{result.content}"})
+
+#     # def generate():
+#     #     # messages = [HumanMessage(content=userQuestion)]
+#     #     for chunk in chain.stream(userQuestion):
+#     #         # yield f"{chunk.content}\n"
+#     #         yield chunk.content
+#     #         # print(chunk.content, end="|", flush=True)
+#     # return Response(stream_with_context(generate()), content_type="text/event-stream")
 
 
 @app.route("/question/bedrock", methods=["POST"])
@@ -290,18 +353,6 @@ def sendQuestionByBedrock():
         return jsonify({"result": userQuestion + " 없음"})
 
 
-# stream = response["body"]
-# if stream:
-#     for event in stream:
-#         chunk = event["chunk"]
-#         if chunk:
-#             # print(json.loads(chunk.get("bytes").decode()))
-#             result = json.loads(chunk["bytes"].decode())
-#             print(result)
-#             if result["type"] == "content_block_delta":
-#                 yield result["delta"]["text"]
-
-
 def check_file_exists_in_pdfs(filename):
     return os.path.isfile(f"./pdfs/{filename}")
 
@@ -314,6 +365,230 @@ def testtest():
 
 # 챗봇 기본 세팅
 setCahtBot()
+
+
+@app.route("/test/m", methods=["POST"])
+def mtest():
+    data = request.get_json()
+    userQuestion = data["question"]
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", "You're an assistant who's good at {ability}"),
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "{question}"),
+        ]
+    )
+
+    chain = prompt | llm
+
+    chain_with_history = RunnableWithMessageHistory(
+        chain,
+        # Uses the get_by_session_id function defined in the example
+        # above.
+        get_session_history,
+        input_messages_key="question",
+        history_messages_key="history",
+        history_factory_config=[
+            ConfigurableFieldSpec(
+                id="session_id",
+                annotation=str,
+                name="Session ID",
+                description="Unique identifier for the session.",
+                default="",
+                is_shared=True,
+            ),
+        ],
+    )
+
+    # result = []
+
+    # result.append(
+    #     chain_with_history.invoke(  # noqa: T201
+    #         {"ability": "math", "question": "What does cosine mean?"},
+    #         config={"configurable": {"session_id": "foo"}},
+    #     )
+    # )
+    # result = chain_with_history.invoke(  # noqa: T201
+    #     {"ability": "math", "question": "What does cosine mean?"},
+    #     config={"configurable": {"session_id": "foo"}},
+    # )
+    result = chain_with_history.invoke(  # noqa: T201
+        {"ability": "llm", "question": userQuestion},
+        config={"configurable": {"session_id": "foo"}},
+    )
+
+    print(result.content)
+
+    # Uses the store defined in the example above.
+    # result.append(store)  # noqa: T201
+
+    # result.append(
+    #     chain_with_history.invoke(  # noqa: T201
+    #         {"ability": "math", "question": "What's its inverse"},
+    #         config={"configurable": {"session_id": "foo"}},
+    #     )
+    # )
+
+    # result.append(store)  # noqa: T201
+
+    return jsonify({"result": f"{result.content}"})
+
+
+@app.route("/test/m2", methods=["POST"])
+def mtest2():
+    with_message_history = RunnableWithMessageHistory(llm, get_session_history)
+
+    config = {"configurable": {"session_id": "abc2"}}
+    response = with_message_history.invoke(
+        [HumanMessage(content="Hi! I'm Bob")],
+        config=config,
+    )
+    print(response.content)
+    response = with_message_history.invoke(
+        [HumanMessage(content="What's my name?")],
+        config=config,
+    )
+    print(response.content)
+    config = {"configurable": {"session_id": "abc3"}}
+
+    response = with_message_history.invoke(
+        [HumanMessage(content="What's my name?")],
+        config=config,
+    )
+    print(response.content)
+    config = {"configurable": {"session_id": "abc2"}}
+
+    response = with_message_history.invoke(
+        [HumanMessage(content="What's my name?")],
+        config=config,
+    )
+
+    print(response.content)
+    print("__________________________________________________________________________")
+    print(get_session_history("abc2"))
+    print("__________________________________________________________________________")
+
+    return jsonify({"result": "test"})
+
+
+# @app.route("/test/m3", methods=["POST"])
+@app.route("/question/langchain", methods=["POST"])
+def mtest3():
+    global store
+    data = request.get_json()
+    fileName = data["fileName"]
+    fileNum = data["fileNum"]
+    collection_name = f"{fileNum}_{fileName}"
+    userQuestion = data["question"]
+    print("collection_name: ", collection_name)
+    print("userQuestion: ", userQuestion)
+    # 리트리버 세팅
+    chroma_db = Chroma(
+        client=database_client,
+        collection_name=collection_name,
+        embedding_function=embedding,
+    )
+    retriever = chroma_db.as_retriever(search_kwargs={"k": 3})
+
+    # 히스토리 프롬프트
+    contextualize_q_system_prompt = (
+        "Given a chat history and the latest user question "
+        "which might reference context in the chat history, "
+        "formulate a standalone question which can be understood "
+        "without the chat history. Do NOT answer the question, "
+        "just reformulate it if needed and otherwise return it as is."
+    )
+    # 히스토피 프롬프트 합체
+    contextualize_q_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", contextualize_q_system_prompt),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}"),
+        ]
+    )
+
+    # 히스토리 리트리버 합체
+    history_aware_retriever = create_history_aware_retriever(
+        llm, retriever, contextualize_q_prompt
+    )
+
+    system_prompt = (
+        # "You are an assistant for question-answering tasks. "
+        "You are a helpful assistant"
+        "Use the following pieces of retrieved context to answer "
+        "the question. If you don't know the answer, say that you "
+        "don't know. Use three sentences maximum and keep the "
+        "answer concise."
+        "\n\n"
+        "{context}"
+    )
+    qa_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}"),
+        ]
+    )
+    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+
+    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+
+    # 채팅 기록?
+
+    def get_session_history(session_id: str) -> BaseChatMessageHistory:
+        if session_id not in store:
+            store[session_id] = ChatMessageHistory()
+        return store[session_id]
+
+    conversational_rag_chain = RunnableWithMessageHistory(
+        rag_chain,
+        get_session_history,
+        input_messages_key="input",
+        history_messages_key="chat_history",
+        output_messages_key="answer",
+    )
+
+    # conversational_rag_chain.invoke(
+    #     {"input": userQuestion},
+    #     config={
+    #         "configurable": {"session_id": collection_name}
+    #     },  # constructs a key "abc123" in `store`.
+    # )["answer"]
+
+    # result = []
+    # for message in store[collection_name].messages:
+    #     if isinstance(message, AIMessage):
+    #         prefix = "AI"
+    #     else:
+    #         prefix = "User"
+    #     result.append({prefix: f"{message.content}\n"})
+
+    # return jsonify({"result": result})
+
+    def generate():
+        # messages = [HumanMessage(content=userQuestion)]
+        for chunk in conversational_rag_chain.stream(
+            {"input": userQuestion},
+            config={
+                "configurable": {"session_id": collection_name}
+            },  # constructs a key "abc123" in `store`.
+        ):
+            # yield f"{chunk.content}\n"
+            if isinstance(chunk, dict) and "answer" in chunk:
+                # print(chunk)
+                yield chunk["answer"]
+            # print(chunk.content, end="|", flush=True)
+
+    return Response(stream_with_context(generate()), content_type="text/event-stream")
+
+
+#     # def generate():
+#     #     # messages = [HumanMessage(content=userQuestion)]
+#     #     for chunk in chain.stream(userQuestion):
+#     #         # yield f"{chunk.content}\n"
+#     #         yield chunk.content
+#     #         # print(chunk.content, end="|", flush=True)
+#     # return Response(stream_with_context(generate()), content_type="text/event-stream")
 
 
 if __name__ == "__main__":
