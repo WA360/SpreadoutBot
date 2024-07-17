@@ -125,8 +125,8 @@ def setDB(loc):
         )
     elif loc == "server":
         database_client = chromadb.HttpClient(
-            # host="localhost",
-            host="host.docker.internal",
+            host="localhost",
+            # host="host.docker.internal",
             port=7000,
             ssl=False,
             headers=None,
@@ -624,10 +624,9 @@ def mtest3():
     system_prompt = (
         # "You are an assistant for question-answering tasks. "
         "You are a helpful assistant"
-        "Use the following pieces of retrieved context to answer "
-        "the question. If you don't know the answer, say that you "
-        "don't know. Use three sentences maximum and keep the "
-        "answer concise."
+        "Use the following pieces of retrieved context to answer the question."
+        "If there is no answer to the given information, answer what you know."
+        "answer in detail and use markdown"
         "\n\n"
         "{context}"
     )
@@ -656,40 +655,46 @@ def mtest3():
         history_messages_key="chat_history",
         output_messages_key="answer",
     )
+
     ## 그냥 답변
-    conversational_rag_chain.invoke(
-        {"input": userQuestion},
-        config={
-            "configurable": {"session_id": chat_name}
-        },  # constructs a key "abc123" in `store`.
-    )["answer"]
+    # conversational_rag_chain.invoke(
+    #     {"input": userQuestion},
+    #     config={
+    #         "configurable": {"session_id": chat_name}
+    #     },  # constructs a key "abc123" in `store`.
+    # )["answer"]
 
-    result = []
-    for message in store[chat_name].messages:
-        if isinstance(message, AIMessage):
-            prefix = "AI"
-        else:
-            prefix = "User"
-        result.append({prefix: f"{message.content}\n"})
+    # result = []
+    # for message in store[chat_name].messages:
+    #     if isinstance(message, AIMessage):
+    #         prefix = "AI"
+    #     else:
+    #         prefix = "User"
+    #     result.append({prefix: f"{message.content}\n"})
 
-    return jsonify({"result": result})
+    # # 저장소 출력
+    # print(store[chat_name])
+    # return jsonify({"result": result})
 
-    ## 스트림 답변
-    # def generate():
-    #     # messages = [HumanMessage(content=userQuestion)]
-    #     for chunk in conversational_rag_chain.stream(
-    #         {"input": userQuestion},
-    #         config={
-    #             "configurable": {"session_id": chat_name}
-    #         },  # constructs a key "abc123" in `store`.
-    #     ):
-    #         # yield f"{chunk.content}\n"
-    #         if isinstance(chunk, dict) and "answer" in chunk:
-    #             # print(chunk)
-    #             yield chunk["answer"]
-    #         # print(chunk.content, end="|", flush=True)
+    # 스트림 답변
+    def generate():
+        # messages = [HumanMessage(content=userQuestion)]
+        for chunk in conversational_rag_chain.stream(
+            {"input": userQuestion},
+            config={
+                "configurable": {"session_id": chat_name}
+            },  # constructs a key "abc123" in `store`.
+        ):
+            # yield f"{chunk.content}\n"
+            if isinstance(chunk, dict) and "answer" in chunk:
+                # print(chunk)
+                yield chunk["answer"]
+            # print(chunk.content, end="|", flush=True)
 
-    # return Response(stream_with_context(generate()), content_type="text/event-stream")
+    # # 저장소 출력
+    print(store)
+
+    return Response(stream_with_context(generate()), content_type="text/event-stream")
 
 
 #     # def generate():
