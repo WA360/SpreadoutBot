@@ -13,7 +13,7 @@ services:
     profiles:
       - windows
 
-  chroma_ec2:
+  chroma_linux:
     image: chromadb/chroma
     container_name: chroma
     ports:
