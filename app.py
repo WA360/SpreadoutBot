@@ -125,8 +125,8 @@ def setDB(loc):
         )
     elif loc == "server":
         database_client = chromadb.HttpClient(
-            host="localhost",
-            # host="host.docker.internal",
+            # host="localhost",
+            host="host.docker.internal",
             port=7000,
             ssl=False,
             headers=None,

@@ -6,6 +6,8 @@ services:
       - "7000:8000"
     environment:
       - ALLOW_RESET=TRUE
+    networks:
+      - jungle_network
     volumes:
       - C:\db\chroma:/chroma/chroma
     profiles:
@@ -18,6 +20,8 @@ services:
       - "7000:8000"
     environment:
       - ALLOW_RESET=TRUE
+    networks:
+      - jungle_network
     volumes:
       - /home/ubuntu/db/chroma:/chroma/chroma
     profiles:
