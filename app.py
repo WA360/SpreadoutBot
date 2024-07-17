@@ -6,6 +6,8 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 import os
 
+import requests
+
 # bedrock chatbot 필요 라이브러리
 import boto3
 
@@ -627,6 +629,7 @@ def mtest3():
         "Use the following pieces of retrieved context to answer the question."
         "If there is no answer to the given information, answer what you know."
         "answer in detail and use markdown"
+        "'책' 라는 단어가 있으면 주어진 내용에서만 답을 하세요."
         "\n\n"
         "{context}"
     )
@@ -645,7 +648,16 @@ def mtest3():
 
     def get_session_history(session_id: str) -> BaseChatMessageHistory:
         if session_id not in store:
+            history = getHistory(session_id)
+            print("---------------------history-------------------------------")
+            print(history)
+            print("--------------------------------------------------------------")
+            # store[session_id] = history
             store[session_id] = ChatMessageHistory()
+            test = ChatMessageHistory()
+            print("--------------------test-------------------------")
+            print(test)
+            print("--------------------------------------------------------------")
         return store[session_id]
 
     conversational_rag_chain = RunnableWithMessageHistory(
@@ -657,24 +669,26 @@ def mtest3():
     )
 
     ## 그냥 답변
-    # conversational_rag_chain.invoke(
-    #     {"input": userQuestion},
-    #     config={
-    #         "configurable": {"session_id": chat_name}
-    #     },  # constructs a key "abc123" in `store`.
-    # )["answer"]
+    conversational_rag_chain.invoke(
+        {"input": userQuestion},
+        config={
+            "configurable": {"session_id": chat_name}
+        },  # constructs a key "abc123" in `store`.
+    )["answer"]
 
-    # result = []
-    # for message in store[chat_name].messages:
-    #     if isinstance(message, AIMessage):
-    #         prefix = "AI"
-    #     else:
-    #         prefix = "User"
-    #     result.append({prefix: f"{message.content}\n"})
+    result = []
+    for message in store[chat_name].messages:
+        if isinstance(message, AIMessage):
+            prefix = "AI"
+        else:
+            prefix = "User"
+        result.append({prefix: f"{message.content}\n"})
 
-    # # 저장소 출력
-    # print(store[chat_name])
-    # return jsonify({"result": result})
+    # 저장소 출력
+    updateresult = updateHistory(store[chat_name], chatNum)
+    print(updateresult)
+    print(store[chat_name])
+    return jsonify({"result": result})
 
     # 스트림 답변
     def generate():
@@ -697,6 +711,22 @@ def mtest3():
     return Response(stream_with_context(generate()), content_type="text/event-stream")
 
 
+def getHistory(sessionId):
+    url = f"http://localhost:3000/bot/session/detail?chapterId={sessionId}"
+    response = requests.get(url).json()
+    # print(response[0]["content"])
+    return response[0]["content"]
+    return jsonify({"result": response[0]["content"]})
+
+
+# @app.route("/test/h", methods=["GET"])
+def updateHistory(content, chapterId):
+    data = {"content": content, "chapterId": chapterId}
+    url = f"http://localhost:3000/bot/session/detail"
+    response = requests.put(url, data=data)
+    return response
+
+
 #     # def generate():
 #     #     # messages = [HumanMessage(content=userQuestion)]
 #     #     for chunk in chain.stream(userQuestion):
@@ -716,4 +746,4 @@ def mtest3():
 #     )
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000)
+    app.run(host="0.0.0.0", port=3100)

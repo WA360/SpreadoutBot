@@ -6,7 +6,7 @@ services:
     image: nmm_bot
     # container_name: nmm_django
     ports:
-      - "8100:3000"
+      - "8100:3100"
     networks:
       - jungle_network
     volumes:

@@ -22,7 +22,7 @@ RUN pip install -U python-dotenv
 COPY . /app/
 
 # 포트를 노출
-EXPOSE 3000
+EXPOSE 3100
 
 # Django 서버 실행 명령
 CMD ["python", "app.py"]
