@@ -1,0 +1,24 @@
+services:
+  chroma_windows:
+    image: chromadb/chroma
+    container_name: chroma
+    ports:
+      - "7000:8000"
+    environment:
+      - ALLOW_RESET=TRUE
+    volumes:
+      - C:\db\chroma:/chroma/chroma
+    profiles:
+      - windows
+
+  chroma_ec2:
+    image: chromadb/chroma
+    container_name: chroma
+    ports:
+      - "7000:8000"
+    environment:
+      - ALLOW_RESET=TRUE
+    volumes:
+      - /home/ubuntu/db/chroma:/chroma/chroma
+    profiles:
+      - linux
