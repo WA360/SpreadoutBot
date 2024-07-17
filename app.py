@@ -139,6 +139,7 @@ def setDB(loc):
         database_client = chromadb.HttpClient(
             host="chroma",
             # host="host.docker.internal",
+            host="localhost",
             port=7000,
             ssl=False,
             headers=None,
