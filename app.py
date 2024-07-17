@@ -648,7 +648,7 @@ def mtest3():
 
     def get_session_history(session_id: str) -> BaseChatMessageHistory:
         if session_id not in store:
-            history = getHistory(session_id)
+            # history = getHistory(session_id)
             print("---------------------history-------------------------------")
             print(history)
             print("--------------------------------------------------------------")
@@ -711,20 +711,20 @@ def mtest3():
     return Response(stream_with_context(generate()), content_type="text/event-stream")
 
 
-def getHistory(sessionId):
-    url = f"http://localhost:3000/bot/session/detail?chapterId={sessionId}"
-    response = requests.get(url).json()
-    # print(response[0]["content"])
-    return response[0]["content"]
-    return jsonify({"result": response[0]["content"]})
+# def getHistory(sessionId):
+#     url = f"http://localhost:3000/bot/session/detail?chapterId={sessionId}"
+#     response = requests.get(url).json()
+#     # print(response[0]["content"])
+#     return response[0]["content"]
+#     return jsonify({"result": response[0]["content"]})
 
 
-# @app.route("/test/h", methods=["GET"])
-def updateHistory(content, chapterId):
-    data = {"content": content, "chapterId": chapterId}
-    url = f"http://localhost:3000/bot/session/detail"
-    response = requests.put(url, data=data)
-    return response
+# # @app.route("/test/h", methods=["GET"])
+# def updateHistory(content, chapterId):
+#     data = {"content": content, "chapterId": chapterId}
+#     url = f"http://localhost:3000/bot/session/detail"
+#     response = requests.put(url, data=data)
+#     return response
 
 
 #     # def generate():
