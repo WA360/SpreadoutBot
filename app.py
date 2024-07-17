@@ -137,8 +137,8 @@ def setDB(loc):
     elif loc == "ec2":
         print(f"loc :{loc}")
         database_client = chromadb.HttpClient(
-            # host="chroma",
-            host="host.docker.internal",
+            host="chroma",
+            # host="host.docker.internal",
             port=7000,
             ssl=False,
             headers=None,
