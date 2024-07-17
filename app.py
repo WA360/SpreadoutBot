@@ -650,7 +650,7 @@ def mtest3():
         if session_id not in store:
             # history = getHistory(session_id)
             print("---------------------history-------------------------------")
-            print(history)
+            # print(history)
             print("--------------------------------------------------------------")
             # store[session_id] = history
             store[session_id] = ChatMessageHistory()
