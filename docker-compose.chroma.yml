@@ -26,3 +26,7 @@ services:
       - /home/ubuntu/db/chroma:/chroma/chroma
     profiles:
       - linux
+networks:
+  jungle_network:
+    external: true
+    driver: bridge
