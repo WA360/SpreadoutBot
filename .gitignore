@@ -163,3 +163,5 @@ cython_debug/
 
 /bot
 *.pdf
+
+requirements2.txt

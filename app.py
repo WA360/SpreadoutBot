@@ -33,6 +33,7 @@ from langchain_community.chat_message_histories import ChatMessageHistory
 
 # langchain pdf reader , pdf splitter
 from langchain_community.document_loaders import PyPDFLoader
+import pymupdf as fitz
 from langchain_text_splitters import CharacterTextSplitter
 
 # langchain embedding 필요 라이브러리
@@ -58,6 +59,13 @@ from langchain_chroma import Chroma
 import chromadb
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE, Settings
 
+
+class Document:
+    def __init__(self, metadata, page_content):
+        self.metadata = metadata
+        self.page_content = page_content
+
+
 app = Flask(__name__)
 CORS(app)
 
@@ -68,7 +76,7 @@ s3_secret_access_key = os.getenv("S3_SECRET_ACCESS_KEY")
 bedrock_region = os.getenv("BEDROCK_AWS_REGION")
 bedrock_access_key_id = os.getenv("BEDROCK_ACCESS_KEY")
 bedrock_secret_access_key = os.getenv("BEDROCK_SECRET_ACCESS_KEY")
-host = os.getenv("BEDROCK_SECRET_ACCESS_KEY")
+host = os.getenv("HOST")
 
 database_client = None  # db 위치
 embedding = None  # 임베딩 방법
@@ -119,7 +127,7 @@ def setDB(loc):
         database_client = chromadb.HttpClient(
             host="localhost",
             # host="host.docker.internal",
-            port=8000,
+            port=7000,
             ssl=False,
             headers=None,
             settings=Settings(allow_reset=True),
@@ -159,6 +167,50 @@ def setLLM():
         client=bedrock,
         streaming=True,
     )
+
+
+def extract_chapters(file_path):
+    # PDF 파일 열기
+    pdf_document = fitz.open(file_path)
+
+    # 목차 읽기
+    toc = pdf_document.get_toc()
+
+    # 각 단원의 시작 및 끝 페이지를 저장할 리스트
+    chapters = []
+
+    for i in range(len(toc) - 1):
+        current_chapter = toc[i]
+        next_chapter = toc[i + 1]
+
+        chapter_title = current_chapter[1]
+        start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
+        end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
+
+        chapters.append((chapter_title, start_page, end_page))
+
+    # 마지막 챕터 추가
+    last_chapter = toc[-1]
+    chapter_title = last_chapter[1]
+    start_page = last_chapter[2] - 1
+    end_page = pdf_document.page_count - 1
+
+    chapters.append((chapter_title, start_page, end_page))
+
+    # 각 단원의 내용을 배열에 저장
+    chapter_contents = []
+
+    for chapter in chapters:
+        title, start_page, end_page = chapter
+        content = ""
+
+        for page_num in range(start_page, end_page + 1):
+            page = pdf_document.load_page(page_num)
+            content += page.get_text()
+
+        chapter_contents.append((title, content))
+
+    return chapter_contents
 
 
 # def get_session_history(user_id: str, conversation_id: str) -> BaseChatMessageHistory:
@@ -206,20 +258,72 @@ def setPdf():
     if is_file:
         print("파일 다운로드 완료!")
         collection_name = f"{fileNum}_{fileName}"
-        documents = PyPDFLoader(download_path).load_and_split()
-        text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        docs = text_splitter.split_documents(documents)
 
+        # # 기본 나누기(청크 단위로 나누기)
+        # documents = PyPDFLoader(download_path).load_and_split()
+        # documents = PyPDFLoader("./pdfs/Chapters.pdf").load_and_split()
+        # text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        # docs = text_splitter.split_documents(documents)
+        # print(docs)
+        # 새로운 나누기(챕터별로 나누기)--------------------------------------------------
+        # PDF 파일 열기
+        pdf_document = fitz.open(download_path)
+
+        # 목차 읽기
+        toc = pdf_document.get_toc()
+
+        # 각 단원의 시작 및 끝 페이지를 저장할 리스트
+        chapters = []
+
+        for i in range(len(toc) - 1):
+            current_chapter = toc[i]
+            next_chapter = toc[i + 1]
+
+            chapter_title = current_chapter[1]
+            start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
+            end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
+
+            chapters.append((chapter_title, start_page, end_page))
+
+        # 마지막 챕터 추가
+        last_chapter = toc[-1]
+        chapter_title = last_chapter[1]
+        start_page = last_chapter[2] - 1
+        end_page = pdf_document.page_count - 1
+
+        chapters.append((chapter_title, start_page, end_page))
+
+        # 각 단원의 내용을 배열에 저장
+        chapter_contents = []
+
+        for chapter in chapters:
+            title, start_page, end_page = chapter
+            content = ""
+
+            for page_num in range(start_page, end_page + 1):
+                page = pdf_document.load_page(page_num)
+                content += page.get_text()
+
+            chapter_contents.append(
+                Document(
+                    # metadata={title: title, page: start_page}, page_content=content
+                    metadata={title: title},
+                    page_content=content,
+                )
+            )
+        # --------------------------------------------------------------------
         chroma_db = Chroma(
             client=database_client,
             collection_name=collection_name,
             embedding_function=embedding,
         )
         print(f"{chroma_db._collection.count()}개 있음")
+        pdf_document.close()
         if chroma_db._collection.count() == 0:
             # save to disk
             Chroma.from_documents(
-                documents=docs,
+                # documents=docs,
+                documents=chapter_contents,
                 embedding=embedding,
                 collection_name=collection_name,
                 client=database_client,
@@ -478,7 +582,9 @@ def mtest3():
     data = request.get_json()
     fileName = data["fileName"]
     fileNum = data["fileNum"]
+    chatNum = data["chatNum"]
     collection_name = f"{fileNum}_{fileName}"
+    chat_name = f"{fileNum}_{fileName}_{chatNum}"
     userQuestion = data["question"]
     print("collection_name: ", collection_name)
     print("userQuestion: ", userQuestion)
@@ -547,39 +653,40 @@ def mtest3():
         history_messages_key="chat_history",
         output_messages_key="answer",
     )
+    ## 그냥 답변
+    conversational_rag_chain.invoke(
+        {"input": userQuestion},
+        config={
+            "configurable": {"session_id": chat_name}
+        },  # constructs a key "abc123" in `store`.
+    )["answer"]
 
-    # conversational_rag_chain.invoke(
-    #     {"input": userQuestion},
-    #     config={
-    #         "configurable": {"session_id": collection_name}
-    #     },  # constructs a key "abc123" in `store`.
-    # )["answer"]
+    result = []
+    for message in store[chat_name].messages:
+        if isinstance(message, AIMessage):
+            prefix = "AI"
+        else:
+            prefix = "User"
+        result.append({prefix: f"{message.content}\n"})
 
-    # result = []
-    # for message in store[collection_name].messages:
-    #     if isinstance(message, AIMessage):
-    #         prefix = "AI"
-    #     else:
-    #         prefix = "User"
-    #     result.append({prefix: f"{message.content}\n"})
+    return jsonify({"result": result})
 
-    # return jsonify({"result": result})
+    ## 스트림 답변
+    # def generate():
+    #     # messages = [HumanMessage(content=userQuestion)]
+    #     for chunk in conversational_rag_chain.stream(
+    #         {"input": userQuestion},
+    #         config={
+    #             "configurable": {"session_id": chat_name}
+    #         },  # constructs a key "abc123" in `store`.
+    #     ):
+    #         # yield f"{chunk.content}\n"
+    #         if isinstance(chunk, dict) and "answer" in chunk:
+    #             # print(chunk)
+    #             yield chunk["answer"]
+    #         # print(chunk.content, end="|", flush=True)
 
-    def generate():
-        # messages = [HumanMessage(content=userQuestion)]
-        for chunk in conversational_rag_chain.stream(
-            {"input": userQuestion},
-            config={
-                "configurable": {"session_id": collection_name}
-            },  # constructs a key "abc123" in `store`.
-        ):
-            # yield f"{chunk.content}\n"
-            if isinstance(chunk, dict) and "answer" in chunk:
-                # print(chunk)
-                yield chunk["answer"]
-            # print(chunk.content, end="|", flush=True)
-
-    return Response(stream_with_context(generate()), content_type="text/event-stream")
+    # return Response(stream_with_context(generate()), content_type="text/event-stream")
 
 
 #     # def generate():
@@ -590,6 +697,15 @@ def mtest3():
 #     #         # print(chunk.content, end="|", flush=True)
 #     # return Response(stream_with_context(generate()), content_type="text/event-stream")
 
+# file_path = "./pdfs/csapp13.pdf"
+# chapter_contents = extract_chapters(file_path)
+
+# for title, content in chapter_contents:
+#     print(f"Chapter: {title}")
+#     print(content)
+#     print(
+#         "--------------------------------------------------------------------------------------"
+#     )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=3000)
