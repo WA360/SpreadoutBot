@@ -669,26 +669,26 @@ def mtest3():
     )
 
     ## 그냥 답변
-    conversational_rag_chain.invoke(
-        {"input": userQuestion},
-        config={
-            "configurable": {"session_id": chat_name}
-        },  # constructs a key "abc123" in `store`.
-    )["answer"]
+    # conversational_rag_chain.invoke(
+    #     {"input": userQuestion},
+    #     config={
+    #         "configurable": {"session_id": chat_name}
+    #     },  # constructs a key "abc123" in `store`.
+    # )["answer"]
 
-    result = []
-    for message in store[chat_name].messages:
-        if isinstance(message, AIMessage):
-            prefix = "AI"
-        else:
-            prefix = "User"
-        result.append({prefix: f"{message.content}\n"})
+    # result = []
+    # for message in store[chat_name].messages:
+    #     if isinstance(message, AIMessage):
+    #         prefix = "AI"
+    #     else:
+    #         prefix = "User"
+    #     result.append({prefix: f"{message.content}\n"})
 
-    # 저장소 출력
-    updateresult = updateHistory(store[chat_name], chatNum)
-    print(updateresult)
-    print(store[chat_name])
-    return jsonify({"result": result})
+    # # 저장소 출력
+    # updateresult = updateHistory(store[chat_name], chatNum)
+    # print(updateresult)
+    # print(store[chat_name])
+    # return jsonify({"result": result})
 
     # 스트림 답변
     def generate():
@@ -706,7 +706,7 @@ def mtest3():
             # print(chunk.content, end="|", flush=True)
 
     # # 저장소 출력
-    print(store)
+    # print(store)
 
     return Response(stream_with_context(generate()), content_type="text/event-stream")
 
