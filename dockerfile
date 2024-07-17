@@ -14,6 +14,8 @@ RUN pip install --upgrade pip
 # RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install -r requirements.txt
 
+RUN pip install pymupdf
+
 RUN pip install -U python-dotenv
 
 # 소스 코드 복사
