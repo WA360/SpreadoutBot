@@ -69,7 +69,6 @@ import chromadb
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE, Settings
 
 # mysql
-import pymysql
 from flask_mysqldb import MySQL
 
 
