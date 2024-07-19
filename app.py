@@ -41,6 +41,7 @@ from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_community.document_loaders import PyPDFLoader
 import pymupdf as fitz
 from langchain_text_splitters import CharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 # langchain embedding 필요 라이브러리
 from langchain_community.embeddings import BedrockEmbeddings
@@ -61,7 +62,6 @@ from langchain.schema.runnable import RunnablePassthrough
 from langchain.chains import create_history_aware_retriever
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
-
 
 # chromadb
 from langchain_chroma import Chroma
@@ -132,7 +132,7 @@ class InMemoryHistory(BaseChatMessageHistory, BaseModel):
 # 기본 세팅
 def setCahtBot():
     setDB(host)
-    setEmbedding("langchain")
+    setEmbedding("bedrock")
     setLLM()
 
 
@@ -181,14 +181,15 @@ def setEmbedding(loc):
         embedding = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     elif loc == "bedrock":
         embedding = BedrockEmbeddings(
-            model_id="amazon.titan-embed-text-v2:0", client=bedrock
+            model_id="amazon.titan-embed-text-v1", client=bedrock
         )
 
 
 def setLLM():
     global llm
     llm = ChatBedrock(
-        model_id="anthropic.claude-3-haiku-20240307-v1:0",
+        # model_id="anthropic.claude-3-haiku-20240307-v1:0",
+        model_id="anthropic.claude-3-sonnet-20240229-v1:0",
         client=bedrock,
         streaming=True,
     )
@@ -307,16 +308,16 @@ def setPdf():
         for chapter in chapters:
             title, start_page, end_page = chapter
             content = ""
-
+            print(f"title: {title} 진행중")
             for page_num in range(start_page, end_page + 1):
                 page = pdf_document.load_page(page_num)
                 content += page.get_text()
-
+            new_content = process_text(content)
             chapter_contents.append(
                 Document(
                     # metadata={title: title, page: start_page}, page_content=content
                     metadata={title: title},
-                    page_content=content,
+                    page_content=str(new_content),
                 )
             )
         # --------------------------------------------------------------------
@@ -601,7 +602,7 @@ def mtest3():
         collection_name=collection_name,
         embedding_function=embedding,
     )
-    retriever = chroma_db.as_retriever(search_kwargs={"k": 3})
+    retriever = chroma_db.as_retriever(search_kwargs={"k": 30})
 
     # 히스토리 프롬프트
     contextualize_q_system_prompt = (
@@ -631,7 +632,7 @@ def mtest3():
         "Use the following pieces of retrieved context to answer the question."
         "If there is no answer to the given information, answer what you know."
         "answer in detail and use markdown"
-        "'책' 라는 단어가 있으면 주어진 내용에서만 답을 하세요."
+        # "'책' 라는 단어가 있으면 주어진 내용에서만 답을 하세요."
         "\n\n"
         "{context}"
     )
@@ -664,7 +665,7 @@ def mtest3():
     )
 
     # 그냥 답변
-    conversational_rag_chain.invoke(
+    res = conversational_rag_chain.invoke(
         {"input": userQuestion},
         config={
             "configurable": {"session_id": chat_name}
@@ -683,6 +684,7 @@ def mtest3():
     # updateresult = updateHistory(store[chat_name], chatNum)
     # print(updateresult)
     print(store[chat_name])
+    return jsonify({"result": res})
     return jsonify({"result": result})
 
     # 스트림 답변
@@ -743,7 +745,8 @@ def mtest3():
 
 @app.route("/save/pdf/test", methods=["POST"])
 def setPdftest():
-    fileName = "jotcoding-1-25.pdf"
+    # fileName = "jotcoding-1-25.pdf"
+    fileName = "csapp13.pdf"
     download_path = f"./pdfs/{fileName}"
 
     pdf_document = fitz.open(download_path)
@@ -762,7 +765,7 @@ def setPdftest():
         chapter_title = current_chapter[1]
         start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
         end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
-
+        # print(f"{chapter_level} ,{chapter_title} , {start_page} , {end_page}")
         chapters.append((chapter_title, start_page, end_page))
 
     # 마지막 챕터 추가
@@ -773,7 +776,7 @@ def setPdftest():
 
     chapters.append((chapter_title, start_page, end_page))
 
-    # 각 단원의 내용을 배열에 저장
+    # # 각 단원의 내용을 배열에 저장
     chapter_contents = []
 
     for chapter in chapters:
@@ -785,6 +788,15 @@ def setPdftest():
             page = pdf_document.load_page(page_num)
             content += page.get_text()
 
+        # print(
+        #     "시작------------------------------------------------------------------------------------------"
+        # )
+        # print(f"title: {title}")
+        # print(f"content: {content}")
+        # print(
+        #     "끝------------------------------------------------------------------------------------------"
+        # )
+
         chapter_contents.append(
             Document(
                 # metadata={title: title, page: start_page}, page_content=content
@@ -795,10 +807,10 @@ def setPdftest():
     # --------------------------------------------------------------------
     # 프롬프트 설정
     system_prompt = (
-        "You are a helpful assistant"
-        "Use the following pieces of retrieved context to answer the question."
-        "If there is no answer to the given information, answer what you know."
-        "반드시 json 포맷으로 응답하세요. key 는summary 와 keywords 를 사용하세요  "
+        "당신은 컴퓨터 사이언스를 잘 알고 있는 도우미 입니다."
+        "주어진 내용을 사용하여 질문에 답하세요. 반드시 한글로 답하세요"
+        "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
+        "반드시 json 포맷으로 응답하세요. key 는summary 와 keywords 를 사용하세요"
         "\n\n"
         "{context}"
     )
@@ -832,13 +844,14 @@ def setPdftest():
         )
         try:
             data = json.loads(response.content)
+            # print(data)
             summary = data["summary"]
             keywords = data["keywords"]
-            list_as_string = json.dumps(keywords, ensure_ascii=False)
-            # print(f"Summary: {summary}")
-            # print(f"Keywords: {keywords}")
+            # list_as_string = json.dumps(keywords, ensure_ascii=False)
+            print(f"Summary: {summary}")
+            print(f"Keywords: {keywords}")
             # print(f"Chapter ID: {chapterId}")
-            cur.execute(query, (summary, list_as_string, chapterId))
+            # cur.execute(query, (summary, list_as_string, chapterId))
         except json.JSONDecodeError as e:
             print(f"JSON Decode Error: {e}")
         except KeyError as e:
@@ -847,6 +860,7 @@ def setPdftest():
         # print("끝----------------------------------------------------------------")
     mysql.connection.commit()
     cur.close()
+
     # return jsonify({"result": chapters})
     # return jsonify({"result": "upload success"})
     # chroma_db = Chroma(
@@ -871,6 +885,43 @@ def setPdftest():
     #     os.remove(download_path)
     #     return jsonify({"result": "file already exists"})
     return jsonify({"result": "file already exists"})
+
+
+# 텍스트 임베딩 함수
+def get_embeddings(text, bedrock_client):
+    response = bedrock_client.invoke_model(
+        modelId="bedrock-embedding", body=text, contentType="application/json"
+    )
+    embeddings = response["body"]["embedding"]
+    return embeddings
+
+
+# 텍스트 요약 함수
+def summarize_text(text):
+    llm2 = ChatBedrock(
+        model_id="anthropic.claude-3-haiku-20240307-v1:0",
+        client=bedrock,
+        streaming=True,
+    )
+    summary = llm2.invoke(
+        text + "\n\n 위의 내용 8000토큰 보다 작지만 원본에 가깝게 요약해줘"
+    )
+    # print(summary.content)
+    return summary.content
+
+
+# 주어진 텍스트를 8000 토큰 이하로 요약하는 함수
+def process_text(text):
+    current_text = text
+    # token_count = count_tokens(current_text)
+    token_count = llm.get_num_tokens(current_text)
+    while token_count > 7000:
+        print(f"token_count: {token_count}")
+        current_text = summarize_text(current_text)
+        token_count = llm.get_num_tokens(current_text)
+        print(f"줄인 token_count: {token_count}")
+
+    return current_text, token_count
 
 
 # 챗봇 기본 세팅
