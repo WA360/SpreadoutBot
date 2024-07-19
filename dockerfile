@@ -18,6 +18,8 @@ RUN pip install pymupdf
 
 RUN pip install -U python-dotenv
 
+RUN pip install flask_mysqldb
+
 # 소스 코드 복사
 COPY . /app/
 
