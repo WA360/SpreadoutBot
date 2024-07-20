@@ -494,65 +494,6 @@ def pdfToc():
         return jsonify({"result": "toc 없음"})
 
 
-@app.route("/question/langchain/test", methods=["POST"])
-def sendQuestionBylangchain():
-    data = request.get_json()
-    fileName = data["fileName"]
-    fileNum = data["fileNum"]
-    collection_name = f"{fileNum}_{fileName}"
-    userQuestion = data["question"]
-    print(userQuestion)
-    # load from disk
-    chroma_db = Chroma(
-        client=database_client,
-        collection_name=collection_name,
-        embedding_function=embedding,
-    )
-    # docs = chroma_db.similarity_search(question, k=2)
-    # print(docs)
-    retriever = chroma_db.as_retriever(search_kwargs={"k": 10})
-
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                """
-                You are a helpful assistant.
-                Answer questions using only the following context.
-                If you don't know the answer just say you don't know,
-                don't makel it up:
-                \n\n
-                {context}
-                """,
-            ),
-            ("human", "{question}"),
-        ]
-    )
-
-    chain = (
-        {
-            "context": retriever,
-            "question": RunnablePassthrough(),
-        }
-        | prompt
-        | llm
-    )
-
-    # result = chain.invoke(userQuestion)
-    result = chain.invoke([HumanMessage(content=userQuestion)])
-
-    return jsonify({"result": f"{result.content}"})
-
-    # def generate():
-    #     # messages = [HumanMessage(content=userQuestion)]
-    #     for chunk in chain.stream(userQuestion):
-    #         # yield f"{chunk.content}\n"
-    #         yield chunk.content
-    #         # print(chunk.content, end="|", flush=True)
-    # return Response(stream_with_context(generate()), content_type="text/event-stream")
-
-
-
 
 
 @app.route("/test", methods=["GET"])
@@ -701,13 +642,7 @@ def mtest3():
                     ),
                 ]
             )
-
-            # llm 및 체인 설정
-            llm = ChatBedrock(
-                model_id="anthropic.claude-3-haiku-20240307-v1:0",
-                client=bedrock,
-                streaming=True,
-            )
+            
             chain = final_prompt | llm
             # response = chain.invoke({"question": userQuestion})
             # return response.content
@@ -721,6 +656,67 @@ def mtest3():
             )
         else:
             return jsonify({"result": "question 없음"})
+
+
+
+@app.route("/question/langchain/test", methods=["POST"])
+def sendQuestionBylangchain():
+    data = request.get_json()
+    fileName = data["fileName"]
+    fileNum = data["fileNum"]
+    collection_name = f"{fileNum}_{fileName}"
+    userQuestion = data["question"]
+    print(userQuestion)
+    # load from disk
+    chroma_db = Chroma(
+        client=database_client,
+        collection_name=collection_name,
+        embedding_function=embedding,
+    )
+    # docs = chroma_db.similarity_search(question, k=2)
+    # print(docs)
+    retriever = chroma_db.as_retriever(search_kwargs={"k": 10})
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                """
+                You are a helpful assistant.
+                Answer questions using only the following context.
+                If you don't know the answer just say you don't know,
+                don't makel it up:
+                \n\n
+                {context}
+                """,
+            ),
+            ("human", "{question}"),
+        ]
+    )
+
+    chain = (
+        {
+            "context": retriever,
+            "question": RunnablePassthrough(),
+        }
+        | prompt
+        | llm
+    )
+
+    # result = chain.invoke(userQuestion)
+    result = chain.invoke([HumanMessage(content=userQuestion)])
+
+    return jsonify({"result": f"{result.content}"})
+
+    # def generate():
+    #     # messages = [HumanMessage(content=userQuestion)]
+    #     for chunk in chain.stream(userQuestion):
+    #         # yield f"{chunk.content}\n"
+    #         yield chunk.content
+    #         # print(chunk.content, end="|", flush=True)
+    # return Response(stream_with_context(generate()), content_type="text/event-stream")
+
+
 
 
 # 텍스트 임베딩 함수
