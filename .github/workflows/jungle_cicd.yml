@@ -33,6 +33,10 @@ jobs:
           echo "BEDROCK_AWS_REGION=${{ secrets.BEDROCK_AWS_REGION }}" >> .env 
           echo "BEDROCK_ACCESS_KEY=${{ secrets.BEDROCK_ACCESS_KEY }}" >> .env 
           echo "BEDROCK_SECRET_ACCESS_KEY=${{ secrets.BEDROCK_SECRET_ACCESS_KEY }}" >> .env 
+          echo "MYSQL_DB=${{ secrets.MYSQL_DB }}" >> .env 
+          echo "MYSQL_HOST=${{ secrets.MYSQL_HOST }}" >> .env 
+          echo "MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}" >> .env 
+          echo "MYSQL_USER=${{ secrets.MYSQL_USER }}" >> .env 
           echo "HOST=${{ vars.HOST }}" >> .env 
           cat .env
 
