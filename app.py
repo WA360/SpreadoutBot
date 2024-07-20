@@ -491,6 +491,7 @@ def setPdftest():
 
 @app.route("/save/pdf/test2", methods=["POST"])
 def setPdftest2():
+    print("요청은 왔음")
     data = request.get_json()
     fileName = data["fileName"]
     fileNum = data["fileNum"]
@@ -512,10 +513,11 @@ def setPdftest2():
         print(f"Downloaded {fileName} from bucket {bucket_name} to {download_path}")
     except Exception as e:
         print(f"Error downloading file: {e}")
-
+    print("파일 다운로드함")
     # pdf load
     is_file = check_file_exists_in_pdfs(fileName)
     if is_file:
+        print("파일 다운 성공")
         # fileName = "jotcoding-1-25.pdf"
         # fileNum = 18
         # fileName = "jotcoding.pdf"
@@ -1103,48 +1105,48 @@ def mtest3():
         output_messages_key="answer",
     )
 
-    # 그냥 답변
-    res = conversational_rag_chain.invoke(
-        {"input": userQuestion},
-        config={
-            "configurable": {"session_id": chat_name}
-        },  # constructs a key "abc123" in `store`.
-    )["answer"]
+    # # 그냥 답변
+    # res = conversational_rag_chain.invoke(
+    #     {"input": userQuestion},
+    #     config={
+    #         "configurable": {"session_id": chat_name}
+    #     },  # constructs a key "abc123" in `store`.
+    # )["answer"]
 
-    result = []
-    for message in store[chat_name].messages:
-        if isinstance(message, AIMessage):
-            prefix = "AI"
-        else:
-            prefix = "User"
-        result.append({prefix: f"{message.content}\n"})
+    # result = []
+    # for message in store[chat_name].messages:
+    #     if isinstance(message, AIMessage):
+    #         prefix = "AI"
+    #     else:
+    #         prefix = "User"
+    #     result.append({prefix: f"{message.content}\n"})
 
-    # 저장소 출력
-    # updateresult = updateHistory(store[chat_name], chatNum)
-    # print(updateresult)
-    print(store[chat_name])
-    return jsonify({"result": res})
-    return jsonify({"result": result})
+    # # 저장소 출력
+    # # updateresult = updateHistory(store[chat_name], chatNum)
+    # # print(updateresult)
+    # print(store[chat_name])
+    # return jsonify({"result": res})
+    # return jsonify({"result": result})
 
     # 스트림 답변
-    # def generate():
-    #     # messages = [HumanMessage(content=userQuestion)]
-    #     for chunk in conversational_rag_chain.stream(
-    #         {"input": userQuestion},
-    #         config={
-    #             "configurable": {"session_id": chat_name}
-    #         },  # constructs a key "abc123" in `store`.
-    #     ):
-    #         # yield f"{chunk.content}\n"
-    #         if isinstance(chunk, dict) and "answer" in chunk:
-    #             # print(chunk)
-    #             yield chunk["answer"]
-    #         # print(chunk.content, end="|", flush=True)
+    def generate():
+        # messages = [HumanMessage(content=userQuestion)]
+        for chunk in conversational_rag_chain.stream(
+            {"input": userQuestion},
+            config={
+                "configurable": {"session_id": chat_name}
+            },  # constructs a key "abc123" in `store`.
+        ):
+            # yield f"{chunk.content}\n"
+            if isinstance(chunk, dict) and "answer" in chunk:
+                # print(chunk)
+                yield chunk["answer"]
+            # print(chunk.content, end="|", flush=True)
 
-    # # # 저장소 출력
-    # # print(store)
+    # # 저장소 출력
+    # print(store)
 
-    # return Response(stream_with_context(generate()), content_type="text/event-stream")
+    return Response(stream_with_context(generate()), content_type="text/event-stream")
 
 
 # 텍스트 임베딩 함수
