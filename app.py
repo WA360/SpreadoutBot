@@ -315,7 +315,7 @@ def setPdf():
             chapter_contents.append(
                 Document(
                     # metadata={title: title, page: start_page}, page_content=content
-                    metadata={title: title},
+                    metadata={"title": title},
                     page_content=str(new_content),
                 )
             )
@@ -343,6 +343,446 @@ def setPdf():
             return jsonify({"result": "file already exists"})
     else:
         return jsonify({"result": "파일 없음, 다운로드실패?"})
+
+
+@app.route("/save/pdf/test", methods=["POST"])
+def setPdftest():
+    # fileName = "jotcoding-1-25.pdf"
+    fileName = "csapp13.pdf"
+    download_path = f"./pdfs/{fileName}"
+
+    pdf_document = fitz.open(download_path)
+
+    # 목차 읽기
+    toc = pdf_document.get_toc()
+
+    # 각 단원의 시작 및 끝 페이지를 저장할 리스트
+    chapters = []
+
+    for i in range(len(toc) - 1):
+        current_chapter = toc[i]
+        next_chapter = toc[i + 1]
+
+        chapter_level = current_chapter[0]
+        chapter_title = current_chapter[1]
+        start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
+        end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
+        # print(f"{chapter_level} ,{chapter_title} , {start_page} , {end_page}")
+        chapters.append((chapter_title, start_page, end_page))
+
+    # 마지막 챕터 추가
+    last_chapter = toc[-1]
+    chapter_title = last_chapter[1]
+    start_page = last_chapter[2] - 1
+    end_page = pdf_document.page_count - 1
+
+    chapters.append((chapter_title, start_page, end_page))
+
+    # # 각 단원의 내용을 배열에 저장
+    chapter_contents = []
+
+    for chapter in chapters:
+        title, start_page, end_page = chapter
+        content = ""
+        if start_page > end_page:
+            end_page = start_page
+        for page_num in range(start_page, end_page + 1):
+            page = pdf_document.load_page(page_num)
+            content += page.get_text()
+
+        # print(
+        #     "시작------------------------------------------------------------------------------------------"
+        # )
+        # print(f"title: {title}")
+        # print(f"content: {content}")
+        # print(
+        #     "끝------------------------------------------------------------------------------------------"
+        # )
+
+        chapter_contents.append(
+            Document(
+                # metadata={title: title, page: start_page}, page_content=content
+                metadata={"title": title, "page": start_page},
+                page_content=content,
+            )
+        )
+    # --------------------------------------------------------------------
+    # 프롬프트 설정
+    system_prompt = (
+        "당신은 컴퓨터 사이언스를 잘 알고 있는 도우미 입니다."
+        "주어진 내용을 사용하여 질문에 답하세요. 반드시 한글로 답하세요"
+        "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
+        "반드시 json 포맷으로 응답하세요. key 는summary 와 keywords 를 사용하세요"
+        "\n\n"
+        "{context}"
+    )
+    final_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            (
+                "human",
+                "{title}이 가리키는 부분을 찾아 내용을 요약하고 중요 키워드를 5개 뽑아주세요.",
+            ),
+        ]
+    )
+
+    # llm 및 체인 설정
+    llm = ChatBedrock(
+        model_id="anthropic.claude-3-haiku-20240307-v1:0",
+        client=bedrock,
+        streaming=True,
+    )
+    # chain = final_prompt | llm | output_parser
+    chain = final_prompt | llm
+    # --------------------------------------------------------------------------
+    # print(format_instructions)
+    chapterId = 2625
+    cur = mysql.connection.cursor()
+    query = "update api_chapter ac set ac.summary =%s ,ac.keywords=%s where ac.id=%s"
+    for chapter in chapter_contents:
+        print(f"chapter:{chapterId}-----------------------------------------------")
+        response = chain.invoke(
+            {"context": chapter.page_content, "title": chapter.metadata["title"]}
+        )
+        try:
+            data = json.loads(response.content)
+            # print(data)
+            summary = data["summary"]
+            keywords = data["keywords"]
+            # list_as_string = json.dumps(keywords, ensure_ascii=False)
+            print(f"Summary: {summary}")
+            print(f"Keywords: {keywords}")
+            # print(f"Chapter ID: {chapterId}")
+            # cur.execute(query, (summary, list_as_string, chapterId))
+        except json.JSONDecodeError as e:
+            print(f"JSON Decode Error: {e}")
+        except KeyError as e:
+            print(f"Key Error: Missing key {e}")
+        chapterId += 1
+        # print("끝----------------------------------------------------------------")
+    mysql.connection.commit()
+    cur.close()
+
+    # return jsonify({"result": chapters})
+    # return jsonify({"result": "upload success"})
+    # chroma_db = Chroma(
+    #     client=database_client,
+    #     collection_name=collection_name,
+    #     embedding_function=embedding,
+    # )
+    # print(f"{chroma_db._collection.count()}개 있음")
+    # pdf_document.close()
+    # if chroma_db._collection.count() == 0:
+    #     # save to disk
+    #     Chroma.from_documents(
+    #         # documents=docs,
+    #         documents=chapter_contents,
+    #         embedding=embedding,
+    #         collection_name=collection_name,
+    #         client=database_client,
+    #     )
+    #     os.remove(download_path)
+    #     return jsonify({"result": "upload success"})
+    # else:
+    #     os.remove(download_path)
+    #     return jsonify({"result": "file already exists"})
+    return jsonify({"result": "file already exists"})
+
+
+@app.route("/save/pdf/test2", methods=["POST"])
+def setPdftest2():
+    data = request.get_json()
+    fileName = data["fileName"]
+    fileNum = data["fileNum"]
+    chapterId = data["chapterId"]
+    bucket_name = s3_bucket_name
+    download_path = f"./pdfs/{fileName}"
+
+    # file download from S3
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=s3_access_key_id,
+        aws_secret_access_key=s3_secret_access_key,
+        region_name=s3_region,
+    )
+
+    try:
+        # PDF 파일 다운로드
+        s3.download_file(bucket_name, fileName, download_path)
+        print(f"Downloaded {fileName} from bucket {bucket_name} to {download_path}")
+    except Exception as e:
+        print(f"Error downloading file: {e}")
+
+    # pdf load
+    is_file = check_file_exists_in_pdfs(fileName)
+    if is_file:
+        # fileName = "jotcoding-1-25.pdf"
+        # fileNum = 18
+        # fileName = "jotcoding.pdf"
+        download_path = f"./pdfs/{fileName}"
+        collection_name = f"{fileNum}_{fileName}"
+        pdf_document = fitz.open(download_path)
+
+        # 목차 읽기
+        toc = pdf_document.get_toc()
+
+        # 각 단원의 시작 및 끝 페이지를 저장할 리스트
+        chapters = []
+
+        print(f"목차 길이: {len(toc)}")
+        for i in range(len(toc) - 1):
+            current_chapter = toc[i]
+            next_chapter = toc[i + 1]
+
+            chapter_level = current_chapter[0]
+            chapter_title = current_chapter[1]
+            start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
+            end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
+            chapters.append((chapter_title, start_page, end_page))
+            print(chapter_title, start_page, end_page)
+        # 마지막 챕터 추가
+        last_chapter = toc[-1]
+        chapter_title = last_chapter[1]
+        start_page = last_chapter[2] - 1
+        end_page = pdf_document.page_count - 1
+        chapters.append((chapter_title, start_page, end_page))
+        print(f"마지막 챕터 {chapter_title}, {start_page}, {end_page}")
+
+        # # 각 단원의 내용을 배열에 저장
+        chapter_contents = []
+        print("----------------------내용 추출 시작-----------------------------")
+        print(f"챕터 길이: {len(chapters)}")
+        for chapter in chapters:
+            title, start_page, end_page = chapter
+            content = ""
+            print(f"<<{title}>> 내용 추출 진행중")
+            if start_page > end_page:
+                end_page = start_page
+            for page_num in range(start_page, end_page + 1):
+                page = pdf_document.load_page(page_num)
+                content += page.get_text()
+            new_content = process_text(content)
+            chapter_contents.append(
+                Document(
+                    # metadata={title: title, page: start_page}, page_content=content
+                    metadata={"title": title},
+                    page_content=str(new_content),
+                )
+            )
+            # print(
+            #     "시작------------------------------------------------------------------------------------------"
+            # )
+            # print(f"title: {title}")
+            # print(f"content: {content}")
+            # print(
+            #     "끝------------------------------------------------------------------------------------------"
+            # )
+
+        # --------------------------------------------------------------------
+        # 프롬프트 설정
+        system_prompt = (
+            "당신은 컴퓨터 사이언스를 잘 알고 있는 도우미 입니다."
+            "주어진 내용을 사용하여 질문에 답하세요. 반드시 한글로 답하세요"
+            "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
+            "반드시 json 포맷으로 응답하세요. key 는summary 와 keywords 를 사용하세요"
+            "\n\n"
+            "{context}"
+        )
+        final_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", system_prompt),
+                (
+                    "human",
+                    "{title}이 가리키는 부분을 찾아 내용을 요약하고 중요 키워드를 5개 뽑아주세요.",
+                ),
+            ]
+        )
+
+        # llm 및 체인 설정
+        llm = ChatBedrock(
+            model_id="anthropic.claude-3-haiku-20240307-v1:0",
+            client=bedrock,
+            streaming=True,
+        )
+        chain = final_prompt | llm
+        # --------------------------------------------------------------------------
+    
+        cur = mysql.connection.cursor()
+        query = (
+            "update api_chapter ac set ac.summary =%s ,ac.keywords=%s where ac.id=%s"
+        )
+        print("----------------------요약 및 키워드 추출 시작---------------------------")
+        for chapter in chapter_contents:
+            print(f"<<{chapter.metadata["title"]}>> 요약 및 키워드 추출 진행중----------")
+            response = chain.invoke(
+                {"context": chapter.page_content, "title": chapter.metadata["title"]}
+            )
+            try:
+                data = json.loads(response.content)
+                # print(data)
+                summary = data["summary"]
+                keywords = data["keywords"]
+                list_as_string = json.dumps(keywords, ensure_ascii=False)
+                print(f"title: {chapter.metadata["title"]}")
+                print(f"Summary: {summary}")
+                print(f"Keywords: {keywords}")
+                cur.execute(query, (summary, list_as_string, chapterId))
+            except json.JSONDecodeError as e:
+                print(f"JSON Decode Error: {e}")
+            except KeyError as e:
+                print(f"Key Error: Missing key {e}")
+            chapterId += 1
+            # print("끝----------------------------------------------------------------")
+        mysql.connection.commit()
+        cur.close()
+
+        chroma_db = Chroma(
+            client=database_client,
+            collection_name=collection_name,
+            embedding_function=embedding,
+        )
+        print(f"{chroma_db._collection.count()}개 있음")
+        pdf_document.close()
+        if chroma_db._collection.count() == 0:
+            # save to disk
+            Chroma.from_documents(
+                # documents=docs,
+                documents=chapter_contents,
+                embedding=embedding,
+                collection_name=collection_name,
+                client=database_client,
+            )
+            os.remove(download_path)
+            return jsonify({"result": "upload success"})
+        else:
+            os.remove(download_path)
+            return jsonify({"result": "file already exists"})
+    else:
+        return jsonify({"result": "not found file"})
+
+
+@app.route("/pdf/checktoc", methods=["GET"])
+def pdfToc():
+    # fileName = "jotcoding-1-25.pdf"
+    fileNum = 7
+    fileName = "UTILITARIANISM.pdf"
+    data = request.args["book"]
+    if data:
+        fileName = data
+    print(fileName)
+    download_path = f"./pdfs/{fileName}"
+    pdf_document = fitz.open(download_path)
+
+    # 목차 읽기
+    toc = pdf_document.get_toc()
+    print(f"목차 개수: {len(toc)}")
+    # 각 단원의 시작 및 끝 페이지를 저장할 리스트
+    if len(toc) > 0:
+        chapters = []
+        for i in range(len(toc) - 1):
+            current_chapter = toc[i]
+            next_chapter = toc[i + 1]
+
+            chapter_level = current_chapter[0]
+            chapter_title = current_chapter[1]
+            start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
+            end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
+            # print(f"{chapter_level} ,{chapter_title} , {start_page} , {end_page}")
+            chapters.append((chapter_title, start_page, end_page))
+            print(chapter_title, start_page, end_page)
+        # # 마지막 챕터 추가
+        # last_chapter = toc[-1]
+        # chapter_title = last_chapter[1]
+        # start_page = last_chapter[2] - 1
+        # end_page = pdf_document.page_count - 1
+
+        # chapters.append((chapter_title, start_page, end_page))
+
+        # # 각 단원의 내용을 배열에 저장
+        chapter_contents = []
+        print(f"챕터 길이: {len(chapters)}")
+        for chapter in chapters:
+            title, start_page, end_page = chapter
+            content = ""
+            if start_page > end_page:
+                end_page = start_page
+            for page_num in range(start_page, end_page + 1):
+                page = pdf_document.load_page(page_num)
+                content += page.get_text()
+            new_content = process_text(content)
+            chapter_contents.append(
+                Document(
+                    # metadata={title: title, page: start_page}, page_content=content
+                    metadata={"title": title},
+                    page_content=str(new_content),
+                )
+            )
+            # print(
+            #     "시작------------------------------------------------------------------------------------------"
+            # )
+            # print(f"title: {title}")
+            # print(f"content: {content}")
+            # print(
+            #     "끝------------------------------------------------------------------------------------------"
+            # )
+
+        # 요약작업 시작
+        # # --------------------------------------------------------------------
+        # # 프롬프트 설정
+        # system_prompt = (
+        #     "당신은 컴퓨터 사이언스를 잘 알고 있는 도우미 입니다."
+        #     "주어진 내용을 사용하여 질문에 답하세요. 반드시 한글로 답하세요"
+        #     "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
+        #     "반드시 json 포맷으로 응답하세요. key 는summary 와 keywords 를 사용하세요"
+        #     "\n\n"
+        #     "{context}"
+        # )
+        # final_prompt = ChatPromptTemplate.from_messages(
+        #     [
+        #         ("system", system_prompt),
+        #         (
+        #             "human",
+        #             "{title}이 가리키는 부분을 찾아 내용을 요약하고 중요 키워드를 5개 뽑아주세요.",
+        #         ),
+        #     ]
+        # )
+
+        # # llm 및 체인 설정
+        # llm = ChatBedrock(
+        #     model_id="anthropic.claude-3-haiku-20240307-v1:0",
+        #     client=bedrock,
+        #     streaming=True,
+        # )
+        # # chain = final_prompt | llm | output_parser
+        # chain = final_prompt | llm
+        # # --------------------------------------------------------------------------
+        # # print(format_instructions)
+        # chapterId = 1
+        # for chapter in chapter_contents:
+        #     print(f"chapter:{chapterId}-----------------------------------------------")
+        #     response = chain.invoke(
+        #         {"context": chapter.page_content, "title": chapter.metadata["title"]}
+        #     )
+        #     try:
+        #         data = json.loads(response.content)
+        #         # print(data)
+        #         summary = data["summary"]
+        #         keywords = data["keywords"]
+        #         # list_as_string = json.dumps(keywords, ensure_ascii=False)
+        #         print(f"title: {chapter.metadata["title"]}")
+        #         print(f"Summary: {summary}")
+        #         print(f"Keywords: {keywords}")
+        #         # print(f"Chapter ID: {chapterId}")
+        #         # cur.execute(query, (summary, list_as_string, chapterId))
+        #     except json.JSONDecodeError as e:
+        #         print(f"JSON Decode Error: {e}")
+        #     except KeyError as e:
+        #         print(f"Key Error: Missing key {e}")
+        #     chapterId += 1
+        #     # print("끝----------------------------------------------------------------")
+        return jsonify({"result": "데스와~"})
+    else:
+        return jsonify({"result": "toc 없음"})
 
 
 @app.route("/question/langchain/test", methods=["POST"])
@@ -707,185 +1147,6 @@ def mtest3():
     # return Response(stream_with_context(generate()), content_type="text/event-stream")
 
 
-# def getHistory(sessionId):
-#     url = f"http://localhost:3000/bot/session/detail?chapterId={sessionId}"
-#     response = requests.get(url).json()
-#     # print(response[0]["content"])
-#     return response[0]["content"]
-#     return jsonify({"result": response[0]["content"]})
-
-
-# # @app.route("/test/h", methods=["GET"])
-# def updateHistory(content, chapterId):
-#     data = {"content": content, "chapterId": chapterId}
-#     url = f"http://localhost:3000/bot/session/detail"
-#     response = requests.put(url, data=data)
-#     return response
-
-
-#     # def generate():
-#     #     # messages = [HumanMessage(content=userQuestion)]
-#     #     for chunk in chain.stream(userQuestion):
-#     #         # yield f"{chunk.content}\n"
-#     #         yield chunk.content
-#     #         # print(chunk.content, end="|", flush=True)
-#     # return Response(stream_with_context(generate()), content_type="text/event-stream")
-
-# file_path = "./pdfs/csapp13.pdf"
-# chapter_contents = extract_chapters(file_path)
-
-# for title, content in chapter_contents:
-#     print(f"Chapter: {title}")
-#     print(content)
-#     print(
-#         "--------------------------------------------------------------------------------------"
-#     )
-
-
-@app.route("/save/pdf/test", methods=["POST"])
-def setPdftest():
-    # fileName = "jotcoding-1-25.pdf"
-    fileName = "csapp13.pdf"
-    download_path = f"./pdfs/{fileName}"
-
-    pdf_document = fitz.open(download_path)
-
-    # 목차 읽기
-    toc = pdf_document.get_toc()
-
-    # 각 단원의 시작 및 끝 페이지를 저장할 리스트
-    chapters = []
-
-    for i in range(len(toc) - 1):
-        current_chapter = toc[i]
-        next_chapter = toc[i + 1]
-
-        chapter_level = current_chapter[0]
-        chapter_title = current_chapter[1]
-        start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
-        end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
-        # print(f"{chapter_level} ,{chapter_title} , {start_page} , {end_page}")
-        chapters.append((chapter_title, start_page, end_page))
-
-    # 마지막 챕터 추가
-    last_chapter = toc[-1]
-    chapter_title = last_chapter[1]
-    start_page = last_chapter[2] - 1
-    end_page = pdf_document.page_count - 1
-
-    chapters.append((chapter_title, start_page, end_page))
-
-    # # 각 단원의 내용을 배열에 저장
-    chapter_contents = []
-
-    for chapter in chapters:
-        title, start_page, end_page = chapter
-        content = ""
-        if start_page > end_page:
-            end_page = start_page
-        for page_num in range(start_page, end_page + 1):
-            page = pdf_document.load_page(page_num)
-            content += page.get_text()
-
-        # print(
-        #     "시작------------------------------------------------------------------------------------------"
-        # )
-        # print(f"title: {title}")
-        # print(f"content: {content}")
-        # print(
-        #     "끝------------------------------------------------------------------------------------------"
-        # )
-
-        chapter_contents.append(
-            Document(
-                # metadata={title: title, page: start_page}, page_content=content
-                metadata={"title": title, "page": start_page},
-                page_content=content,
-            )
-        )
-    # --------------------------------------------------------------------
-    # 프롬프트 설정
-    system_prompt = (
-        "당신은 컴퓨터 사이언스를 잘 알고 있는 도우미 입니다."
-        "주어진 내용을 사용하여 질문에 답하세요. 반드시 한글로 답하세요"
-        "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
-        "반드시 json 포맷으로 응답하세요. key 는summary 와 keywords 를 사용하세요"
-        "\n\n"
-        "{context}"
-    )
-    final_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            (
-                "human",
-                "{title}이 가리키는 부분을 찾아 내용을 요약하고 중요 키워드를 5개 뽑아주세요.",
-            ),
-        ]
-    )
-
-    # llm 및 체인 설정
-    llm = ChatBedrock(
-        model_id="anthropic.claude-3-haiku-20240307-v1:0",
-        client=bedrock,
-        streaming=True,
-    )
-    # chain = final_prompt | llm | output_parser
-    chain = final_prompt | llm
-    # --------------------------------------------------------------------------
-    # print(format_instructions)
-    chapterId = 2625
-    cur = mysql.connection.cursor()
-    query = "update api_chapter ac set ac.summary =%s ,ac.keywords=%s where ac.id=%s"
-    for chapter in chapter_contents:
-        print(f"chapter:{chapterId}-----------------------------------------------")
-        response = chain.invoke(
-            {"context": chapter.page_content, "title": chapter.metadata["title"]}
-        )
-        try:
-            data = json.loads(response.content)
-            # print(data)
-            summary = data["summary"]
-            keywords = data["keywords"]
-            # list_as_string = json.dumps(keywords, ensure_ascii=False)
-            print(f"Summary: {summary}")
-            print(f"Keywords: {keywords}")
-            # print(f"Chapter ID: {chapterId}")
-            # cur.execute(query, (summary, list_as_string, chapterId))
-        except json.JSONDecodeError as e:
-            print(f"JSON Decode Error: {e}")
-        except KeyError as e:
-            print(f"Key Error: Missing key {e}")
-        chapterId += 1
-        # print("끝----------------------------------------------------------------")
-    mysql.connection.commit()
-    cur.close()
-
-    # return jsonify({"result": chapters})
-    # return jsonify({"result": "upload success"})
-    # chroma_db = Chroma(
-    #     client=database_client,
-    #     collection_name=collection_name,
-    #     embedding_function=embedding,
-    # )
-    # print(f"{chroma_db._collection.count()}개 있음")
-    # pdf_document.close()
-    # if chroma_db._collection.count() == 0:
-    #     # save to disk
-    #     Chroma.from_documents(
-    #         # documents=docs,
-    #         documents=chapter_contents,
-    #         embedding=embedding,
-    #         collection_name=collection_name,
-    #         client=database_client,
-    #     )
-    #     os.remove(download_path)
-    #     return jsonify({"result": "upload success"})
-    # else:
-    #     os.remove(download_path)
-    #     return jsonify({"result": "file already exists"})
-    return jsonify({"result": "file already exists"})
-
-
 # 텍스트 임베딩 함수
 def get_embeddings(text, bedrock_client):
     response = bedrock_client.invoke_model(
@@ -921,6 +1182,41 @@ def process_text(text):
         print(f"줄인 token_count: {token_count}")
 
     return current_text, token_count
+
+
+# def getHistory(sessionId):
+#     url = f"http://localhost:3000/bot/session/detail?chapterId={sessionId}"
+#     response = requests.get(url).json()
+#     # print(response[0]["content"])
+#     return response[0]["content"]
+#     return jsonify({"result": response[0]["content"]})
+
+
+# # @app.route("/test/h", methods=["GET"])
+# def updateHistory(content, chapterId):
+#     data = {"content": content, "chapterId": chapterId}
+#     url = f"http://localhost:3000/bot/session/detail"
+#     response = requests.put(url, data=data)
+#     return response
+
+
+#     # def generate():
+#     #     # messages = [HumanMessage(content=userQuestion)]
+#     #     for chunk in chain.stream(userQuestion):
+#     #         # yield f"{chunk.content}\n"
+#     #         yield chunk.content
+#     #         # print(chunk.content, end="|", flush=True)
+#     # return Response(stream_with_context(generate()), content_type="text/event-stream")
+
+# file_path = "./pdfs/csapp13.pdf"
+# chapter_contents = extract_chapters(file_path)
+
+# for title, content in chapter_contents:
+#     print(f"Chapter: {title}")
+#     print(content)
+#     print(
+#         "--------------------------------------------------------------------------------------"
+#     )
 
 
 # 챗봇 기본 세팅
