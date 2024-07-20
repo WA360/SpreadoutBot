@@ -194,304 +194,8 @@ def setLLM():
     )
 
 
-def extract_chapters(file_path):
-    # PDF 파일 열기
-    pdf_document = fitz.open(file_path)
-
-    # 목차 읽기
-    toc = pdf_document.get_toc()
-
-    # 각 단원의 시작 및 끝 페이지를 저장할 리스트
-    chapters = []
-
-    for i in range(len(toc) - 1):
-        current_chapter = toc[i]
-        next_chapter = toc[i + 1]
-
-        chapter_title = current_chapter[1]
-        start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
-        end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
-
-        chapters.append((chapter_title, start_page, end_page))
-
-    # 마지막 챕터 추가
-    last_chapter = toc[-1]
-    chapter_title = last_chapter[1]
-    start_page = last_chapter[2] - 1
-    end_page = pdf_document.page_count - 1
-
-    chapters.append((chapter_title, start_page, end_page))
-
-    # 각 단원의 내용을 배열에 저장
-    chapter_contents = []
-
-    for chapter in chapters:
-        title, start_page, end_page = chapter
-        content = ""
-
-        for page_num in range(start_page, end_page + 1):
-            page = pdf_document.load_page(page_num)
-            content += page.get_text()
-
-        chapter_contents.append((title, content))
-
-    return chapter_contents
-
-
 @app.route("/save/pdf", methods=["POST"])
 def setPdf():
-    data = request.get_json()
-    fileName = data["fileName"]
-    fileNum = data["fileNum"]
-    bucket_name = s3_bucket_name
-    download_path = f"./pdfs/{fileName}"
-
-    # file download from S3
-    s3 = boto3.client(
-        "s3",
-        aws_access_key_id=s3_access_key_id,
-        aws_secret_access_key=s3_secret_access_key,
-        region_name=s3_region,
-    )
-
-    try:
-        # PDF 파일 다운로드
-        s3.download_file(bucket_name, fileName, download_path)
-        print(f"Downloaded {fileName} from bucket {bucket_name} to {download_path}")
-    except Exception as e:
-        print(f"Error downloading file: {e}")
-
-    # pdf load
-    is_file = check_file_exists_in_pdfs(fileName)
-    if is_file:
-        print("파일 다운로드 완료!")
-        collection_name = f"{fileNum}_{fileName}"
-
-        # # 기본 나누기(청크 단위로 나누기)
-        # documents = PyPDFLoader(download_path).load_and_split()
-        # documents = PyPDFLoader("./pdfs/Chapters.pdf").load_and_split()
-        # text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        # docs = text_splitter.split_documents(documents)
-        # print(docs)
-        # 새로운 나누기(챕터별로 나누기)--------------------------------------------------
-        # PDF 파일 열기
-        pdf_document = fitz.open(download_path)
-
-        # 목차 읽기
-        toc = pdf_document.get_toc()
-
-        # 각 단원의 시작 및 끝 페이지를 저장할 리스트
-        chapters = []
-
-        for i in range(len(toc) - 1):
-            current_chapter = toc[i]
-            next_chapter = toc[i + 1]
-
-            chapter_title = current_chapter[1]
-            start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
-            end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
-
-            chapters.append((chapter_title, start_page, end_page))
-
-        # 마지막 챕터 추가
-        last_chapter = toc[-1]
-        chapter_title = last_chapter[1]
-        start_page = last_chapter[2] - 1
-        end_page = pdf_document.page_count - 1
-
-        chapters.append((chapter_title, start_page, end_page))
-
-        # 각 단원의 내용을 배열에 저장
-        chapter_contents = []
-
-        for chapter in chapters:
-            title, start_page, end_page = chapter
-            content = ""
-            print(f"title: {title} 진행중")
-            for page_num in range(start_page, end_page + 1):
-                page = pdf_document.load_page(page_num)
-                content += page.get_text()
-            new_content = process_text(content)
-            chapter_contents.append(
-                Document(
-                    # metadata={title: title, page: start_page}, page_content=content
-                    metadata={"title": title},
-                    page_content=str(new_content),
-                )
-            )
-        # --------------------------------------------------------------------
-        chroma_db = Chroma(
-            client=database_client,
-            collection_name=collection_name,
-            embedding_function=embedding,
-        )
-        print(f"{chroma_db._collection.count()}개 있음")
-        pdf_document.close()
-        if chroma_db._collection.count() == 0:
-            # save to disk
-            Chroma.from_documents(
-                # documents=docs,
-                documents=chapter_contents,
-                embedding=embedding,
-                collection_name=collection_name,
-                client=database_client,
-            )
-            os.remove(download_path)
-            return jsonify({"result": "upload success"})
-        else:
-            os.remove(download_path)
-            return jsonify({"result": "file already exists"})
-    else:
-        return jsonify({"result": "파일 없음, 다운로드실패?"})
-
-
-@app.route("/save/pdf/test", methods=["POST"])
-def setPdftest():
-    # fileName = "jotcoding-1-25.pdf"
-    fileName = "csapp13.pdf"
-    download_path = f"./pdfs/{fileName}"
-
-    pdf_document = fitz.open(download_path)
-
-    # 목차 읽기
-    toc = pdf_document.get_toc()
-
-    # 각 단원의 시작 및 끝 페이지를 저장할 리스트
-    chapters = []
-
-    for i in range(len(toc) - 1):
-        current_chapter = toc[i]
-        next_chapter = toc[i + 1]
-
-        chapter_level = current_chapter[0]
-        chapter_title = current_chapter[1]
-        start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
-        end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
-        # print(f"{chapter_level} ,{chapter_title} , {start_page} , {end_page}")
-        chapters.append((chapter_title, start_page, end_page))
-
-    # 마지막 챕터 추가
-    last_chapter = toc[-1]
-    chapter_title = last_chapter[1]
-    start_page = last_chapter[2] - 1
-    end_page = pdf_document.page_count - 1
-
-    chapters.append((chapter_title, start_page, end_page))
-
-    # # 각 단원의 내용을 배열에 저장
-    chapter_contents = []
-
-    for chapter in chapters:
-        title, start_page, end_page = chapter
-        content = ""
-        if start_page > end_page:
-            end_page = start_page
-        for page_num in range(start_page, end_page + 1):
-            page = pdf_document.load_page(page_num)
-            content += page.get_text()
-
-        # print(
-        #     "시작------------------------------------------------------------------------------------------"
-        # )
-        # print(f"title: {title}")
-        # print(f"content: {content}")
-        # print(
-        #     "끝------------------------------------------------------------------------------------------"
-        # )
-
-        chapter_contents.append(
-            Document(
-                # metadata={title: title, page: start_page}, page_content=content
-                metadata={"title": title, "page": start_page},
-                page_content=content,
-            )
-        )
-    # --------------------------------------------------------------------
-    # 프롬프트 설정
-    system_prompt = (
-        "당신은 컴퓨터 사이언스를 잘 알고 있는 도우미 입니다."
-        "주어진 내용을 사용하여 질문에 답하세요. 반드시 한글로 답하세요"
-        "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
-        "반드시 json 포맷으로 응답하세요. key 는summary 와 keywords 를 사용하세요"
-        "\n\n"
-        "{context}"
-    )
-    final_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            (
-                "human",
-                "{title}이 가리키는 부분을 찾아 내용을 요약하고 중요 키워드를 5개 뽑아주세요.",
-            ),
-        ]
-    )
-
-    # llm 및 체인 설정
-    llm = ChatBedrock(
-        model_id="anthropic.claude-3-haiku-20240307-v1:0",
-        client=bedrock,
-        streaming=True,
-    )
-    # chain = final_prompt | llm | output_parser
-    chain = final_prompt | llm
-    # --------------------------------------------------------------------------
-    # print(format_instructions)
-    chapterId = 2625
-    cur = mysql.connection.cursor()
-    query = "update api_chapter ac set ac.summary =%s ,ac.keywords=%s where ac.id=%s"
-    for chapter in chapter_contents:
-        print(f"chapter:{chapterId}-----------------------------------------------")
-        response = chain.invoke(
-            {"context": chapter.page_content, "title": chapter.metadata["title"]}
-        )
-        try:
-            data = json.loads(response.content)
-            # print(data)
-            summary = data["summary"]
-            keywords = data["keywords"]
-            # list_as_string = json.dumps(keywords, ensure_ascii=False)
-            print(f"Summary: {summary}")
-            print(f"Keywords: {keywords}")
-            # print(f"Chapter ID: {chapterId}")
-            # cur.execute(query, (summary, list_as_string, chapterId))
-        except json.JSONDecodeError as e:
-            print(f"JSON Decode Error: {e}")
-        except KeyError as e:
-            print(f"Key Error: Missing key {e}")
-        chapterId += 1
-        # print("끝----------------------------------------------------------------")
-    mysql.connection.commit()
-    cur.close()
-
-    # return jsonify({"result": chapters})
-    # return jsonify({"result": "upload success"})
-    # chroma_db = Chroma(
-    #     client=database_client,
-    #     collection_name=collection_name,
-    #     embedding_function=embedding,
-    # )
-    # print(f"{chroma_db._collection.count()}개 있음")
-    # pdf_document.close()
-    # if chroma_db._collection.count() == 0:
-    #     # save to disk
-    #     Chroma.from_documents(
-    #         # documents=docs,
-    #         documents=chapter_contents,
-    #         embedding=embedding,
-    #         collection_name=collection_name,
-    #         client=database_client,
-    #     )
-    #     os.remove(download_path)
-    #     return jsonify({"result": "upload success"})
-    # else:
-    #     os.remove(download_path)
-    #     return jsonify({"result": "file already exists"})
-    return jsonify({"result": "file already exists"})
-
-
-@app.route("/save/pdf/test2", methods=["POST"])
-def setPdftest2():
-    print("요청은 왔음")
     data = request.get_json()
     fileName = data["fileName"]
     fileNum = data["fileNum"]
@@ -515,6 +219,8 @@ def setPdftest2():
         print(f"Error downloading file: {e}")
     print("파일 다운로드함")
     # pdf load
+    def check_file_exists_in_pdfs(filename):
+        return os.path.isfile(f"./pdfs/{filename}")
     is_file = check_file_exists_in_pdfs(fileName)
     if is_file:
         print("파일 다운 성공")
@@ -661,6 +367,7 @@ def setPdftest2():
             return jsonify({"result": "file already exists"})
     else:
         return jsonify({"result": "not found file"})
+
 
 
 @app.route("/pdf/checktoc", methods=["GET"])
@@ -845,184 +552,13 @@ def sendQuestionBylangchain():
     # return Response(stream_with_context(generate()), content_type="text/event-stream")
 
 
-def check_file_exists_in_pdfs(filename):
-    return os.path.isfile(f"./pdfs/{filename}")
+
 
 
 @app.route("/test", methods=["GET"])
 def testtest():
     print("테스트 데스와~")
     return jsonify({"result": "테스트 데스와~"})
-
-
-@app.route("/test/m2", methods=["POST"])
-def mtest2():
-    with_message_history = RunnableWithMessageHistory(llm, get_session_history)
-
-    config = {"configurable": {"session_id": "abc2"}}
-    response = with_message_history.invoke(
-        [HumanMessage(content="Hi! I'm Bob")],
-        config=config,
-    )
-    print(response.content)
-    response = with_message_history.invoke(
-        [HumanMessage(content="What's my name?")],
-        config=config,
-    )
-    print(response.content)
-    config = {"configurable": {"session_id": "abc3"}}
-
-    response = with_message_history.invoke(
-        [HumanMessage(content="What's my name?")],
-        config=config,
-    )
-    print(response.content)
-    config = {"configurable": {"session_id": "abc2"}}
-
-    response = with_message_history.invoke(
-        [HumanMessage(content="What's my name?")],
-        config=config,
-    )
-
-    print(response.content)
-    print("__________________________________________________________________________")
-    print(get_session_history("abc2"))
-    print("__________________________________________________________________________")
-
-    return jsonify({"result": "test"})
-
-
-@app.route("/question/langchain/prompt", methods=["POST"])
-def mtest4():
-    global store
-    data = request.get_json()
-    fileName = data["fileName"]
-    fileNum = data["fileNum"]
-    chatNum = data["chatNum"]
-    history_prompt = None
-    retriever_prompt = None
-    if "history_prompt" in data:
-        history_prompt = data["history_prompt"]
-    if "retriever_prompt" in data:
-        retriever_prompt = data["retriever_prompt"]
-    collection_name = f"{fileNum}_{fileName}"
-    chat_name = f"{fileNum}_{fileName}_{chatNum}"
-    userQuestion = data["question"]
-    print("collection_name: ", collection_name)
-    print("userQuestion: ", userQuestion)
-    # 리트리버 세팅
-    chroma_db = Chroma(
-        client=database_client,
-        collection_name=collection_name,
-        embedding_function=embedding,
-    )
-    retriever = chroma_db.as_retriever(search_kwargs={"k": 3})
-    # 히스토리 프롬프트
-    contextualize_q_system_prompt = (
-        "Given a chat history and the latest user question "
-        "which might reference context in the chat history, "
-        "formulate a standalone question which can be understood "
-        "without the chat history. Do NOT answer the question, "
-        "just reformulate it if needed and otherwise return it as is."
-    )
-    if history_prompt:
-        contextualize_q_system_prompt = history_prompt
-    # print(f"contextualize_q_system_prompt: {contextualize_q_system_prompt}")
-    # 히스토피 프롬프트 합체
-    contextualize_q_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", contextualize_q_system_prompt),
-            MessagesPlaceholder("chat_history"),
-            ("human", "{input}"),
-        ]
-    )
-
-    # 히스토리 리트리버 합체
-    history_aware_retriever = create_history_aware_retriever(
-        llm, retriever, contextualize_q_prompt
-    )
-    system_prompt = (
-        # "You are an assistant for question-answering tasks. "
-        "You are a helpful assistant"
-        "Use the following pieces of retrieved context to answer the question."
-        "If there is no answer to the given information, answer what you know."
-        "answer in detail and use markdown"
-        "'책' 라는 단어가 있으면 주어진 내용에서만 답을 하세요."
-        "\n\n"
-        "{context}"
-    )
-    if retriever_prompt:
-        system_prompt = retriever_prompt + "\n\n{context}"
-    # print(f"system_prompt: {system_prompt}")
-    qa_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            MessagesPlaceholder("chat_history"),
-            ("human", "{input}"),
-        ]
-    )
-    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
-
-    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-
-    # 채팅 기록?
-
-    def get_session_history(session_id: str) -> BaseChatMessageHistory:
-        if session_id not in store:
-            # history = getHistory(session_id)
-            # store[session_id] = history
-            store[session_id] = ChatMessageHistory()
-        return store[session_id]
-
-    conversational_rag_chain = RunnableWithMessageHistory(
-        rag_chain,
-        get_session_history,
-        input_messages_key="input",
-        history_messages_key="chat_history",
-        output_messages_key="answer",
-    )
-
-    # 그냥 답변
-    conversational_rag_chain.invoke(
-        {"input": userQuestion},
-        config={
-            "configurable": {"session_id": chat_name}
-        },  # constructs a key "abc123" in `store`.
-    )["answer"]
-
-    result = []
-    for message in store[chat_name].messages:
-        if isinstance(message, AIMessage):
-            prefix = "AI"
-        else:
-            prefix = "User"
-        result.append({prefix: f"{message.content}\n"})
-
-    # 저장소 출력
-    # updateresult = updateHistory(store[chat_name], chatNum)
-    # print(updateresult)
-    print(store[chat_name])
-    return jsonify({"result": result})
-
-    # 스트림 답변
-    def generate():
-        # messages = [HumanMessage(content=userQuestion)]
-        for chunk in conversational_rag_chain.stream(
-            {"input": userQuestion},
-            config={
-                "configurable": {"session_id": chat_name}
-            },  # constructs a key "abc123" in `store`.
-        ):
-            # yield f"{chunk.content}\n"
-            if isinstance(chunk, dict) and "answer" in chunk:
-                # print(chunk)
-                yield chunk["answer"]
-            # print(chunk.content, end="|", flush=True)
-
-    # # 저장소 출력
-    # print(store)
-
-    return Response(stream_with_context(generate()), content_type="text/event-stream")
 
 
 @app.route("/question/langchain", methods=["POST"])
@@ -1223,6 +759,9 @@ def process_text(text):
 
     return current_text, token_count
 
+# 파일 있는지 체크
+def check_file_exists_in_pdfs(filename):
+    return os.path.isfile(f"./pdfs/{filename}")
 
 # def getHistory(sessionId):
 #     url = f"http://localhost:3000/bot/session/detail?chapterId={sessionId}"
@@ -1247,16 +786,6 @@ def process_text(text):
 #     #         yield chunk.content
 #     #         # print(chunk.content, end="|", flush=True)
 #     # return Response(stream_with_context(generate()), content_type="text/event-stream")
-
-# file_path = "./pdfs/csapp13.pdf"
-# chapter_contents = extract_chapters(file_path)
-
-# for title, content in chapter_contents:
-#     print(f"Chapter: {title}")
-#     print(content)
-#     print(
-#         "--------------------------------------------------------------------------------------"
-#     )
 
 
 # 챗봇 기본 세팅
