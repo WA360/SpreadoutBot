@@ -1069,9 +1069,9 @@ def mtest3():
 
     system_prompt = (
         # "You are an assistant for question-answering tasks. "
-        "You are a helpful assistant"
-        "Use the following pieces of retrieved context to answer the question."
-        "If there is no answer to the given information, answer what you know."
+       "당신은 인문학적 영역에 전문가인 도우미 입니다."
+        "주어진 내용을 사용하여 질문에 답하세요. 반드시 한글로 답하세요"
+        "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
         "answer in detail and use markdown"
         # "'책' 라는 단어가 있으면 주어진 내용에서만 답을 하세요."
         "\n\n"
