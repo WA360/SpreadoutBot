@@ -1106,28 +1106,28 @@ def mtest3():
             output_messages_key="answer",
         )
 
-        # # 그냥 답변
-        res = conversational_rag_chain.invoke(
-            {"input": userQuestion},
-            config={
-                "configurable": {"session_id": chat_name}
-            },  # constructs a key "abc123" in `store`.
-        )["answer"]
+        # # # 그냥 답변
+        # res = conversational_rag_chain.invoke(
+        #     {"input": userQuestion},
+        #     config={
+        #         "configurable": {"session_id": chat_name}
+        #     },  # constructs a key "abc123" in `store`.
+        # )["answer"]
 
-        result = []
-        for message in store[chat_name].messages:
-            if isinstance(message, AIMessage):
-                prefix = "AI"
-            else:
-                prefix = "User"
-            result.append({prefix: f"{message.content}\n"})
+        # result = []
+        # for message in store[chat_name].messages:
+        #     if isinstance(message, AIMessage):
+        #         prefix = "AI"
+        #     else:
+        #         prefix = "User"
+        #     result.append({prefix: f"{message.content}\n"})
 
-        # 저장소 출력
-        # updateresult = updateHistory(store[chat_name], chatNum)
-        # print(updateresult)
-        print(store[chat_name])
-        return jsonify({"result": res})
-        return jsonify({"result": result})
+        # # 저장소 출력
+        # # updateresult = updateHistory(store[chat_name], chatNum)
+        # # print(updateresult)
+        # print(store[chat_name])
+        # return jsonify({"result": res})
+        # return jsonify({"result": result})
 
         # 스트림 답변
         def generate():
@@ -1185,63 +1185,6 @@ def mtest3():
             )
         else:
             return jsonify({"result": "question 없음"})
-
-def sendQuestionByBedrock():
-    # userQuestion = request.args.get("question")
-    data = request.get_json()
-    userQuestion = data["question"]
-    # print("userQuestion: ", userQuestion)
-    if userQuestion:
-        # body <- Inference configuration
-        # body = {
-        #     "anthropic_version": "bedrock-2023-05-31",
-        #     "max_tokens": 1000,
-        #     "messages": [
-        #         {
-        #             "role": "user",
-        #             "content": [
-        #                 {
-        #                     "type": "text",
-        #                     "text": userQuestion,
-        #                 },
-        #             ],
-        #         }
-        #     ],
-        # }
-        # # invoke_model <- API Request
-        # response = bedrock.invoke_model(
-        #     modelId="anthropic.claude-3-haiku-20240307-v1:0",
-        #     contentType="application/json",
-        #     accept="application/json",
-        #     body=json.dumps(body),
-        # )
-        # status_code = response["ResponseMetadata"]["HTTPStatusCode"]
-        # if status_code == 200:
-        #     response_body = json.loads(response["body"].read())
-        #     return jsonify({"result": response_body["content"][0]["text"]})
-        # else:
-        #     return jsonify({"result": "뭔가 에러남"})
-        # response = bedrock.invoke_model_with_response_stream(
-        #     body=json.dumps(body),
-        #     modelId="anthropic.claude-3-haiku-20240307-v1:0",
-        #     accept="application/json",
-        #     contentType="application/json",
-        # )
-        # status_code = response["ResponseMetadata"]["HTTPStatusCode"]
-        # if status_code == 200:
-        #     return Response(stream_llm_response(response), content_type="text/plain")
-        # else:
-        #     return jsonify({"result": "뭔가 에러남"})
-        def generate():
-            messages = [HumanMessage(content=userQuestion)]
-            for chunk in llm.stream(messages):
-                # yield f"{chunk.content}\n"
-                yield chunk.content
-        return Response(
-            stream_with_context(generate()), content_type="text/event-stream"
-        )
-    else:
-        return jsonify({"result": userQuestion + " 없음"})
 
 
 # 텍스트 임베딩 함수
