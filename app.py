@@ -1029,124 +1029,219 @@ def mtest4():
 def mtest3():
     global store
     data = request.get_json()
-    fileName = data["fileName"]
-    fileNum = data["fileNum"]
-    chatNum = data["chatNum"]
-    collection_name = f"{fileNum}_{fileName}"
-    chat_name = f"{fileNum}_{fileName}_{chatNum}"
-    userQuestion = data["question"]
-    print("collection_name: ", collection_name)
-    print("userQuestion: ", userQuestion)
-    # 리트리버 세팅
-    chroma_db = Chroma(
-        client=database_client,
-        collection_name=collection_name,
-        embedding_function=embedding,
-    )
-    retriever = chroma_db.as_retriever(search_kwargs={"k": 30})
+    if "fileName" in data:
+        fileName = data["fileName"]
+        fileNum = data["fileNum"]
+        chatNum = data["chatNum"]
+        collection_name = f"{fileNum}_{fileName}"
+        chat_name = f"{fileNum}_{fileName}_{chatNum}"
+        userQuestion = data["question"]
+        print("collection_name: ", collection_name)
+        print("userQuestion: ", userQuestion)
+        # 리트리버 세팅
+        chroma_db = Chroma(
+            client=database_client,
+            collection_name=collection_name,
+            embedding_function=embedding,
+        )
+        retriever = chroma_db.as_retriever(search_kwargs={"k": 30})
 
-    # 히스토리 프롬프트
-    contextualize_q_system_prompt = (
-        "Given a chat history and the latest user question "
-        "which might reference context in the chat history, "
-        "formulate a standalone question which can be understood "
-        "without the chat history. Do NOT answer the question, "
-        "just reformulate it if needed and otherwise return it as is."
-    )
-    # 히스토피 프롬프트 합체
-    contextualize_q_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", contextualize_q_system_prompt),
-            MessagesPlaceholder("chat_history"),
-            ("human", "{input}"),
-        ]
-    )
+        # 히스토리 프롬프트
+        contextualize_q_system_prompt = (
+            "Given a chat history and the latest user question "
+            "which might reference context in the chat history, "
+            "formulate a standalone question which can be understood "
+            "without the chat history. Do NOT answer the question, "
+            "just reformulate it if needed and otherwise return it as is."
+        )
+        # 히스토피 프롬프트 합체
+        contextualize_q_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", contextualize_q_system_prompt),
+                MessagesPlaceholder("chat_history"),
+                ("human", "{input}"),
+            ]
+        )
 
-    # 히스토리 리트리버 합체
-    history_aware_retriever = create_history_aware_retriever(
-        llm, retriever, contextualize_q_prompt
-    )
+        # 히스토리 리트리버 합체
+        history_aware_retriever = create_history_aware_retriever(
+            llm, retriever, contextualize_q_prompt
+        )
 
-    system_prompt = (
-        # "You are an assistant for question-answering tasks. "
-       "당신은 인문학적 영역에 전문가인 도우미 입니다."
-        "주어진 내용을 사용하여 질문에 답하세요. 반드시 한글로 답하세요"
-        "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
-        "answer in detail and use markdown"
-        # "'책' 라는 단어가 있으면 주어진 내용에서만 답을 하세요."
-        "\n\n"
-        "{context}"
-    )
-    qa_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            MessagesPlaceholder("chat_history"),
-            ("human", "{input}"),
-        ]
-    )
-    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+        system_prompt = (
+            # "You are an assistant for question-answering tasks. "
+            "당신은 인문학적 영역에 전문가인 도우미 입니다."
+            "주어진 내용을 사용하여 질문에 답하세요. 반드시 한글로 답하세요"
+            "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
+            "answer in detail and use markdown"
+            # "'책' 라는 단어가 있으면 주어진 내용에서만 답을 하세요."
+            "\n\n"
+            "{context}"
+        )
+        qa_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", system_prompt),
+                MessagesPlaceholder("chat_history"),
+                ("human", "{input}"),
+            ]
+        )
+        question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
 
-    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
 
-    # 채팅 기록?
+        # 채팅 기록?
 
-    def get_session_history(session_id: str) -> BaseChatMessageHistory:
-        if session_id not in store:
-            # history = getHistory(session_id)
-            # store[session_id] = history
-            store[session_id] = ChatMessageHistory()
-        return store[session_id]
+        def get_session_history(session_id: str) -> BaseChatMessageHistory:
+            if session_id not in store:
+                # history = getHistory(session_id)
+                # store[session_id] = history
+                store[session_id] = ChatMessageHistory()
+            return store[session_id]
 
-    conversational_rag_chain = RunnableWithMessageHistory(
-        rag_chain,
-        get_session_history,
-        input_messages_key="input",
-        history_messages_key="chat_history",
-        output_messages_key="answer",
-    )
+        conversational_rag_chain = RunnableWithMessageHistory(
+            rag_chain,
+            get_session_history,
+            input_messages_key="input",
+            history_messages_key="chat_history",
+            output_messages_key="answer",
+        )
 
-    # # 그냥 답변
-    # res = conversational_rag_chain.invoke(
-    #     {"input": userQuestion},
-    #     config={
-    #         "configurable": {"session_id": chat_name}
-    #     },  # constructs a key "abc123" in `store`.
-    # )["answer"]
-
-    # result = []
-    # for message in store[chat_name].messages:
-    #     if isinstance(message, AIMessage):
-    #         prefix = "AI"
-    #     else:
-    #         prefix = "User"
-    #     result.append({prefix: f"{message.content}\n"})
-
-    # # 저장소 출력
-    # # updateresult = updateHistory(store[chat_name], chatNum)
-    # # print(updateresult)
-    # print(store[chat_name])
-    # return jsonify({"result": res})
-    # return jsonify({"result": result})
-
-    # 스트림 답변
-    def generate():
-        # messages = [HumanMessage(content=userQuestion)]
-        for chunk in conversational_rag_chain.stream(
+        # # 그냥 답변
+        res = conversational_rag_chain.invoke(
             {"input": userQuestion},
             config={
                 "configurable": {"session_id": chat_name}
             },  # constructs a key "abc123" in `store`.
-        ):
-            # yield f"{chunk.content}\n"
-            if isinstance(chunk, dict) and "answer" in chunk:
-                # print(chunk)
-                yield chunk["answer"]
-            # print(chunk.content, end="|", flush=True)
+        )["answer"]
 
-    # # 저장소 출력
-    # print(store)
+        result = []
+        for message in store[chat_name].messages:
+            if isinstance(message, AIMessage):
+                prefix = "AI"
+            else:
+                prefix = "User"
+            result.append({prefix: f"{message.content}\n"})
 
-    return Response(stream_with_context(generate()), content_type="text/event-stream")
+        # 저장소 출력
+        # updateresult = updateHistory(store[chat_name], chatNum)
+        # print(updateresult)
+        print(store[chat_name])
+        return jsonify({"result": res})
+        return jsonify({"result": result})
+
+        # 스트림 답변
+        def generate():
+            # messages = [HumanMessage(content=userQuestion)]
+            for chunk in conversational_rag_chain.stream(
+                {"input": userQuestion},
+                config={
+                    "configurable": {"session_id": chat_name}
+                },  # constructs a key "abc123" in `store`.
+            ):
+                # yield f"{chunk.content}\n"
+                if isinstance(chunk, dict) and "answer" in chunk:
+                    # print(chunk)
+                    yield chunk["answer"]
+                # print(chunk.content, end="|", flush=True)
+
+        # # 저장소 출력
+        # print(store)
+
+        return Response(stream_with_context(generate()), content_type="text/event-stream")
+    else:
+        userQuestion = data["question"]
+        if userQuestion:
+            system_prompt = (
+                "당신은 인류학적 영역을 잘 알고 있는 도우미 입니다. 반드시 한글로 답하세요."
+                "\n\n"
+                # "{context}"
+            )
+            final_prompt = ChatPromptTemplate.from_messages(
+                [
+                    ("system", system_prompt),
+                    (
+                        "human",
+                        "{question}",
+                    ),
+                ]
+            )
+
+            # llm 및 체인 설정
+            llm = ChatBedrock(
+                model_id="anthropic.claude-3-haiku-20240307-v1:0",
+                client=bedrock,
+                streaming=True,
+            )
+            chain = final_prompt | llm
+            # response = chain.invoke({"question": userQuestion})
+            # return response.content
+            def generate():
+                # messages = [HumanMessage(content=userQuestion)]
+                for chunk in chain.stream({"question": userQuestion}):
+                    # yield f"{chunk.content}\n"
+                    yield chunk.content
+            return Response(
+                stream_with_context(generate()), content_type="text/event-stream"
+            )
+        else:
+            return jsonify({"result": "question 없음"})
+
+def sendQuestionByBedrock():
+    # userQuestion = request.args.get("question")
+    data = request.get_json()
+    userQuestion = data["question"]
+    # print("userQuestion: ", userQuestion)
+    if userQuestion:
+        # body <- Inference configuration
+        # body = {
+        #     "anthropic_version": "bedrock-2023-05-31",
+        #     "max_tokens": 1000,
+        #     "messages": [
+        #         {
+        #             "role": "user",
+        #             "content": [
+        #                 {
+        #                     "type": "text",
+        #                     "text": userQuestion,
+        #                 },
+        #             ],
+        #         }
+        #     ],
+        # }
+        # # invoke_model <- API Request
+        # response = bedrock.invoke_model(
+        #     modelId="anthropic.claude-3-haiku-20240307-v1:0",
+        #     contentType="application/json",
+        #     accept="application/json",
+        #     body=json.dumps(body),
+        # )
+        # status_code = response["ResponseMetadata"]["HTTPStatusCode"]
+        # if status_code == 200:
+        #     response_body = json.loads(response["body"].read())
+        #     return jsonify({"result": response_body["content"][0]["text"]})
+        # else:
+        #     return jsonify({"result": "뭔가 에러남"})
+        # response = bedrock.invoke_model_with_response_stream(
+        #     body=json.dumps(body),
+        #     modelId="anthropic.claude-3-haiku-20240307-v1:0",
+        #     accept="application/json",
+        #     contentType="application/json",
+        # )
+        # status_code = response["ResponseMetadata"]["HTTPStatusCode"]
+        # if status_code == 200:
+        #     return Response(stream_llm_response(response), content_type="text/plain")
+        # else:
+        #     return jsonify({"result": "뭔가 에러남"})
+        def generate():
+            messages = [HumanMessage(content=userQuestion)]
+            for chunk in llm.stream(messages):
+                # yield f"{chunk.content}\n"
+                yield chunk.content
+        return Response(
+            stream_with_context(generate()), content_type="text/event-stream"
+        )
+    else:
+        return jsonify({"result": userQuestion + " 없음"})
 
 
 # 텍스트 임베딩 함수
