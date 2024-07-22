@@ -416,7 +416,7 @@ def setPdf():
                 cnt+=1
                 i+=1
                 # print("끝----------------------------------------------------------------")
-
+            mysql.connection.commit()
             # db 연결 종료
             cur.close()
             # pdf 종료
