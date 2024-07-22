@@ -235,126 +235,125 @@ def setPdf():
             collection_name=f"{fileNum}.pdf",
             embedding_function=embedding,
         )
-        # 목차 읽기
-        toc = pdf_document.get_toc()
-
-        # 각 단원의 시작 및 끝 페이지를 저장할 리스트
-        chapters = []
-
-        print(f"목차 길이: {len(toc)}")
-        for i in range(len(toc) - 1):
-            current_chapter = toc[i]
-            next_chapter = toc[i + 1]
-
-            chapter_level = current_chapter[0]
-            chapter_title = current_chapter[1]
-            start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
-            end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
-            chapters.append((chapter_title, start_page, end_page))
-            print(chapter_title, start_page, end_page)
-        # 마지막 챕터 추가
-        last_chapter = toc[-1]
-        chapter_title = last_chapter[1]
-        start_page = last_chapter[2] - 1
-        end_page = pdf_document.page_count - 1
-        chapters.append((chapter_title, start_page, end_page))
-        print(f"마지막 챕터 {chapter_title}, {start_page}, {end_page}")
-
-        # # 각 단원의 내용을 배열에 저장
-        chapter_contents = []
-        print("----------------------내용 추출 시작-----------------------------")
-        print(f"챕터 길이: {len(chapters)}")
-        for chapter in chapters:
-            title, start_page, end_page = chapter
-            content = ""
-            print(f"<<{title}>> 내용 추출 진행중")
-            if start_page > end_page:
-                end_page = start_page
-            for page_num in range(start_page, end_page + 1):
-                page = pdf_document.load_page(page_num)
-                content += page.get_text()
-            new_content = process_text(content)
-            chapter_contents.append(
-                Document(
-                    # metadata={title: title, page: start_page}, page_content=content
-                    metadata={"title": title},
-                    page_content=str(new_content),
-                )
-            )
-            # print(
-            #     "시작------------------------------------------------------------------------------------------"
-            # )
-            # print(f"title: {title}")
-            # print(f"content: {content}")
-            # print(
-            #     "끝------------------------------------------------------------------------------------------"
-            # )
-
-        # --------------------------------------------------------------------
-        # 프롬프트 설정
-        system_prompt = (
-            "당신은 인문학적 영역에 전문가인 도우미 입니다."
-            "주어진 내용을 사용하여 질문에 답하세요. 반드시 한글로 답하세요"
-            "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
-            "반드시 json 포맷으로 응답하세요. key 는summary 와 keywords 를 사용하세요"
-            "\n\n"
-            "{context}"
-        )
-        final_prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", system_prompt),
-                (
-                    "human",
-                    "{title}이 가리키는 부분을 찾아 내용을 요약하고 중요 키워드를 5개 뽑아주세요.",
-                ),
-            ]
-        )
-
-        # llm 및 체인 설정
-        llm = ChatBedrock(
-            model_id="anthropic.claude-3-haiku-20240307-v1:0",
-            client=bedrock,
-            streaming=True,
-        )
-        chain = final_prompt | llm
-        # --------------------------------------------------------------------------
-    
-        cur = mysql.connection.cursor()
-        query = (
-            "update api_chapter ac set ac.summary =%s ,ac.keywords=%s where ac.id=%s"
-        )
-        print("----------------------요약 및 키워드 추출 시작---------------------------")
-        cnt=0
-        for chapter in chapter_contents:
-            cnt+=1
-            print(f"{(cnt/len(chapter_contents))*100}%  <<{chapter.metadata["title"]}>> 요약 및 키워드 추출 진행중----------")
-            response = chain.invoke(
-                {"context": chapter.page_content, "title": chapter.metadata["title"]}
-            )
-            try:
-                data = json.loads(response.content)
-                # print(data)
-                summary = data["summary"]
-                keywords = data["keywords"]
-                list_as_string = json.dumps(keywords, ensure_ascii=False)
-                # print(f"title: {chapter.metadata["title"]}")
-                # print(f"Summary: {summary}")
-                # print(f"Keywords: {keywords}")
-                cur.execute(query, (summary, list_as_string, chapterId))
-            except json.JSONDecodeError as e:
-                print(f"JSON Decode Error: {e}")
-            except KeyError as e:
-                print(f"Key Error: Missing key {e}")
-            chapterId += 1
-            # print("끝----------------------------------------------------------------")
-        mysql.connection.commit()
-        cur.close()
-
-        
         print(f"{chroma_db._collection.count()}개 있음")
         pdf_document.close()
         if chroma_db._collection.count() == 0:
-            # save to disk
+            # 목차 읽기
+            toc = pdf_document.get_toc()
+
+            # 각 단원의 시작 및 끝 페이지를 저장할 리스트
+            chapters = []
+
+            print(f"목차 길이: {len(toc)}")
+            for i in range(len(toc) - 1):
+                current_chapter = toc[i]
+                next_chapter = toc[i + 1]
+
+                chapter_level = current_chapter[0]
+                chapter_title = current_chapter[1]
+                start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
+                end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
+                chapters.append((chapter_title, start_page, end_page))
+                print(chapter_title, start_page, end_page)
+            # 마지막 챕터 추가
+            last_chapter = toc[-1]
+            chapter_title = last_chapter[1]
+            start_page = last_chapter[2] - 1
+            end_page = pdf_document.page_count - 1
+            chapters.append((chapter_title, start_page, end_page))
+            print(f"마지막 챕터 {chapter_title}, {start_page}, {end_page}")
+
+            # # 각 단원의 내용을 배열에 저장
+            chapter_contents = []
+            print("----------------------내용 추출 시작-----------------------------")
+            print(f"챕터 길이: {len(chapters)}")
+            for chapter in chapters:
+                title, start_page, end_page = chapter
+                content = ""
+                print(f"<<{title}>> 내용 추출 진행중")
+                if start_page > end_page:
+                    end_page = start_page
+                for page_num in range(start_page, end_page + 1):
+                    page = pdf_document.load_page(page_num)
+                    content += page.get_text()
+                new_content = process_text(content)
+                chapter_contents.append(
+                    Document(
+                        # metadata={title: title, page: start_page}, page_content=content
+                        metadata={"title": title},
+                        page_content=str(new_content),
+                    )
+                )
+                # print(
+                #     "시작------------------------------------------------------------------------------------------"
+                # )
+                # print(f"title: {title}")
+                # print(f"content: {content}")
+                # print(
+                #     "끝------------------------------------------------------------------------------------------"
+                # )
+
+            # --------------------------------------------------------------------
+            # 프롬프트 설정
+            system_prompt = (
+                "당신은 인문학적 영역에 전문가인 도우미 입니다."
+                "주어진 내용을 사용하여 질문에 답하세요. 반드시 한글로 답하세요"
+                "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
+                "반드시 json 포맷으로 응답하세요. key 는summary 와 keywords 를 사용하세요"
+                "\n\n"
+                "{context}"
+            )
+            final_prompt = ChatPromptTemplate.from_messages(
+                [
+                    ("system", system_prompt),
+                    (
+                        "human",
+                        "{title}이 가리키는 부분을 찾아 내용을 요약하고 중요 키워드를 5개 뽑아주세요.",
+                    ),
+                ]
+            )
+
+            # llm 및 체인 설정
+            llm = ChatBedrock(
+                model_id="anthropic.claude-3-haiku-20240307-v1:0",
+                client=bedrock,
+                streaming=True,
+            )
+            chain = final_prompt | llm
+            # --------------------------------------------------------------------------
+        
+            cur = mysql.connection.cursor()
+            query = (
+                "update api_chapter ac set ac.summary =%s ,ac.keywords=%s where ac.id=%s"
+            )
+            print("----------------------요약 및 키워드 추출 시작---------------------------")
+            cnt=0
+            for chapter in chapter_contents:
+                cnt+=1
+                print(f"{(cnt/len(chapter_contents))*100}%  <<{chapter.metadata["title"]}>> 요약 및 키워드 추출 진행중----------")
+                response = chain.invoke(
+                    {"context": chapter.page_content, "title": chapter.metadata["title"]}
+                )
+                try:
+                    data = json.loads(response.content)
+                    # print(data)
+                    summary = data["summary"]
+                    keywords = data["keywords"]
+                    list_as_string = json.dumps(keywords, ensure_ascii=False)
+                    # print(f"title: {chapter.metadata["title"]}")
+                    # print(f"Summary: {summary}")
+                    # print(f"Keywords: {keywords}")
+                    cur.execute(query, (summary, list_as_string, chapterId))
+                except json.JSONDecodeError as e:
+                    print(f"JSON Decode Error: {e}")
+                except KeyError as e:
+                    print(f"Key Error: Missing key {e}")
+                chapterId += 1
+                # print("끝----------------------------------------------------------------")
+            mysql.connection.commit()
+            cur.close()
+
+            # save to db
             Chroma.from_documents(
                 # documents=docs,
                 documents=chapter_contents,
