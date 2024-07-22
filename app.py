@@ -187,8 +187,8 @@ def setEmbedding(loc):
 def setLLM():
     global llm
     llm = ChatBedrock(
-        # model_id="anthropic.claude-3-haiku-20240307-v1:0",
-        model_id="anthropic.claude-3-sonnet-20240229-v1:0",
+        model_id="anthropic.claude-3-haiku-20240307-v1:0",
+        # model_id="anthropic.claude-3-sonnet-20240229-v1:0",
         client=bedrock,
         streaming=True,
     )
@@ -228,9 +228,13 @@ def setPdf():
         # fileNum = 18
         # fileName = "jotcoding.pdf"
         download_path = f"./pdfs/{fileName}"
-        collection_name = f"{fileNum}_{fileName}"
         pdf_document = fitz.open(download_path)
-
+        # db 연결
+        chroma_db = Chroma(
+            client=database_client,
+            collection_name=f"{fileNum}.pdf",
+            embedding_function=embedding,
+        )
         # 목차 읽기
         toc = pdf_document.get_toc()
 
@@ -320,8 +324,10 @@ def setPdf():
             "update api_chapter ac set ac.summary =%s ,ac.keywords=%s where ac.id=%s"
         )
         print("----------------------요약 및 키워드 추출 시작---------------------------")
+        cnt=0
         for chapter in chapter_contents:
-            print(f"<<{chapter.metadata["title"]}>> 요약 및 키워드 추출 진행중----------")
+            cnt+=1
+            print(f"{(cnt/len(chapter_contents))*100}%  <<{chapter.metadata["title"]}>> 요약 및 키워드 추출 진행중----------")
             response = chain.invoke(
                 {"context": chapter.page_content, "title": chapter.metadata["title"]}
             )
@@ -331,9 +337,9 @@ def setPdf():
                 summary = data["summary"]
                 keywords = data["keywords"]
                 list_as_string = json.dumps(keywords, ensure_ascii=False)
-                print(f"title: {chapter.metadata["title"]}")
-                print(f"Summary: {summary}")
-                print(f"Keywords: {keywords}")
+                # print(f"title: {chapter.metadata["title"]}")
+                # print(f"Summary: {summary}")
+                # print(f"Keywords: {keywords}")
                 cur.execute(query, (summary, list_as_string, chapterId))
             except json.JSONDecodeError as e:
                 print(f"JSON Decode Error: {e}")
@@ -344,11 +350,7 @@ def setPdf():
         mysql.connection.commit()
         cur.close()
 
-        chroma_db = Chroma(
-            client=database_client,
-            collection_name=collection_name,
-            embedding_function=embedding,
-        )
+        
         print(f"{chroma_db._collection.count()}개 있음")
         pdf_document.close()
         if chroma_db._collection.count() == 0:
@@ -357,7 +359,7 @@ def setPdf():
                 # documents=docs,
                 documents=chapter_contents,
                 embedding=embedding,
-                collection_name=collection_name,
+                collection_name=f"{fileNum}.pdf",
                 client=database_client,
             )
             os.remove(download_path)
@@ -506,19 +508,16 @@ def testtest():
 def mtest3():
     global store
     data = request.get_json()
-    if "fileName" in data:
-        fileName = data["fileName"]
+    if "fileNum" in data:
         fileNum = data["fileNum"]
         chatNum = data["chatNum"]
-        collection_name = f"{fileNum}_{fileName}"
-        chat_name = f"{fileNum}_{fileName}_{chatNum}"
+        chat_name = f"{fileNum}_{chatNum}"
         userQuestion = data["question"]
-        print("collection_name: ", collection_name)
         print("userQuestion: ", userQuestion)
         # 리트리버 세팅
         chroma_db = Chroma(
             client=database_client,
-            collection_name=collection_name,
+            collection_name=f"{fileNum}.pdf",
             embedding_function=embedding,
         )
         retriever = chroma_db.as_retriever(search_kwargs={"k": 30})
@@ -642,7 +641,7 @@ def mtest3():
                     ),
                 ]
             )
-            
+
             chain = final_prompt | llm
             # response = chain.invoke({"question": userQuestion})
             # return response.content
@@ -664,13 +663,12 @@ def sendQuestionBylangchain():
     data = request.get_json()
     fileName = data["fileName"]
     fileNum = data["fileNum"]
-    collection_name = f"{fileNum}_{fileName}"
     userQuestion = data["question"]
     print(userQuestion)
     # load from disk
     chroma_db = Chroma(
         client=database_client,
-        collection_name=collection_name,
+        collection_name=f"{fileNum}.pdf",
         embedding_function=embedding,
     )
     # docs = chroma_db.similarity_search(question, k=2)
@@ -783,6 +781,15 @@ def check_file_exists_in_pdfs(filename):
 #     #         # print(chunk.content, end="|", flush=True)
 #     # return Response(stream_with_context(generate()), content_type="text/event-stream")
 
+# def checkbcrypt():
+#     msg = "총, 균, 쇠 (재레드 다이아몬드) (Z-Library).pdf"
+#     msg = msg.encode('utf-8')
+#     print('저장된 해시값:', msg)
+#     # bytes_password = b"총, 균, 쇠 (재레드 다이아몬드) (Z-Library).pdf" #// 비밀번호
+#     bytes_hashed_password = bcrypt.hashpw(password=msg, salt=bcrypt.gensalt())
+#     print('저장된 해시값:', bytes_hashed_password)
+
+# checkbcrypt()
 
 # 챗봇 기본 세팅
 setCahtBot()
