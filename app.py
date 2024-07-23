@@ -559,7 +559,6 @@ def mtest3():
             "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
             # "answer in detail and use markdown"
             "html과 css를 사용해서 답변하세요"
-            "챕터, 장, 단원을 나타내는 단어는 빨간색으로 표시하세요."
             # "'책' 라는 단어가 있으면 주어진 내용에서만 답을 하세요."
             "\n\n"
             "{context}"
@@ -592,25 +591,25 @@ def mtest3():
             output_messages_key="answer",
         )
         # chain 2
-        res = conversational_rag_chain.invoke(
-            {"input": userQuestion},
-            config={
-                "configurable": {"session_id": chat_name}
-            },  # constructs a key "abc123" in `store`.
-        )["answer"]
-        prompt2 = ChatPromptTemplate.from_messages(
-            [
-                # ("system", system_prompt),
-                ("human", "{context}\n\n위의 답변중에 챕터,장, 단원에 대한 글자는 빨간색으로 강조해서 표현해서 다시 적어줘"),
-                # "{cin1}\n\n위의 답변중에 챕터,장, 단원에 대한 글자는 빨간색으로 강조해서 표현해서 다시 적어줘"
-            ]
-        )
-        # print(f"res: {res}")
-        chain2 = (
-            {"context":  lambda x: res}
-            | prompt2
-            | llm
-        )
+        # res = conversational_rag_chain.invoke(
+        #     {"input": userQuestion},
+        #     config={
+        #         "configurable": {"session_id": chat_name}
+        #     },  # constructs a key "abc123" in `store`.
+        # )["answer"]
+        # prompt2 = ChatPromptTemplate.from_messages(
+        #     [
+        #         # ("system", system_prompt),
+        #         ("human", "{context}\n\n위의 답변중에 챕터,장, 단원에 대한 글자는 빨간색으로 강조해서 표현해서 다시 적어줘"),
+        #         # "{cin1}\n\n위의 답변중에 챕터,장, 단원에 대한 글자는 빨간색으로 강조해서 표현해서 다시 적어줘"
+        #     ]
+        # )
+        # # print(f"res: {res}")
+        # chain2 = (
+        #     {"context":  lambda x: res}
+        #     | prompt2
+        #     | llm
+        # )
         # # # # 그냥 답변
         # res = chain2.invoke(
         #     {"input": userQuestion},
@@ -618,26 +617,23 @@ def mtest3():
         # return jsonify({"result": res.content})
         
 
-        # 스트림 답변
-        def generate():
-            # messages = [HumanMessage(content=userQuestion)]
-            # for chunk in conversational_rag_chain.stream(
-            for chunk in chain2.stream(
-                {"input": userQuestion},
-                config={
-                    "configurable": {"session_id": chat_name}
-                },  # constructs a key "abc123" in `store`.
-            ):
-                # yield f"{chunk.content}\n"
-                if isinstance(chunk, dict) and "answer" in chunk:
-                    # print(chunk)
-                    yield chunk["answer"]
-                # print(chunk.content, end="|", flush=True)
+        # # 스트림 답변
+        # def generate():
+        #     # messages = [HumanMessage(content=userQuestion)]
+        #     # for chunk in conversational_rag_chain.stream(
+        #     for chunk in chain2.stream(
+        #         {"input": userQuestion},
+        #         config={
+        #             "configurable": {"session_id": chat_name}
+        #         },  # constructs a key "abc123" in `store`.
+        #     ):
+        #         # yield f"{chunk.content}\n"
+        #         if isinstance(chunk, dict) and "answer" in chunk:
+        #             # print(chunk)
+        #             yield chunk["answer"]
+        #         # print(chunk.content, end="|", flush=True)
 
-        # # 저장소 출력
-        # print(store)
-
-        return Response(stream_with_context(generate()), content_type="text/event-stream")
+        # return Response(stream_with_context(generate()), content_type="text/event-stream")
 
         
         # # # 그냥 답변
@@ -667,7 +663,7 @@ def mtest3():
         def generate():
             # messages = [HumanMessage(content=userQuestion)]
             # for chunk in conversational_rag_chain.stream(
-            for chunk in chain2.stream(
+            for chunk in conversational_rag_chain.stream(
                 {"input": userQuestion},
                 config={
                     "configurable": {"session_id": chat_name}
