@@ -58,6 +58,7 @@ from langchain.output_parsers import (
     ResponseSchema,
     PydanticOutputParser
 )
+from langchain.schema import StrOutputParser
 
 # langchain 리트리버 라이브러리
 from langchain.schema.runnable import RunnablePassthrough
@@ -590,7 +591,55 @@ def mtest3():
             history_messages_key="chat_history",
             output_messages_key="answer",
         )
+        # chain 2
+        res = conversational_rag_chain.invoke(
+            {"input": userQuestion},
+            config={
+                "configurable": {"session_id": chat_name}
+            },  # constructs a key "abc123" in `store`.
+        )["answer"]
+        prompt2 = ChatPromptTemplate.from_messages(
+            [
+                # ("system", system_prompt),
+                ("human", "{context}\n\n위의 답변중에 챕터,장, 단원에 대한 글자는 빨간색으로 강조해서 표현해서 다시 적어줘"),
+                # "{cin1}\n\n위의 답변중에 챕터,장, 단원에 대한 글자는 빨간색으로 강조해서 표현해서 다시 적어줘"
+            ]
+        )
+        # print(f"res: {res}")
+        chain2 = (
+            {"context":  lambda x: res}
+            | prompt2
+            | llm
+        )
+        # # # # 그냥 답변
+        # res = chain2.invoke(
+        #     {"input": userQuestion},
+        # )
+        # return jsonify({"result": res.content})
+        
 
+        # 스트림 답변
+        def generate():
+            # messages = [HumanMessage(content=userQuestion)]
+            # for chunk in conversational_rag_chain.stream(
+            for chunk in chain2.stream(
+                {"input": userQuestion},
+                config={
+                    "configurable": {"session_id": chat_name}
+                },  # constructs a key "abc123" in `store`.
+            ):
+                # yield f"{chunk.content}\n"
+                if isinstance(chunk, dict) and "answer" in chunk:
+                    # print(chunk)
+                    yield chunk["answer"]
+                # print(chunk.content, end="|", flush=True)
+
+        # # 저장소 출력
+        # print(store)
+
+        return Response(stream_with_context(generate()), content_type="text/event-stream")
+
+        
         # # # 그냥 답변
         # res = conversational_rag_chain.invoke(
         #     {"input": userQuestion},
@@ -617,7 +666,8 @@ def mtest3():
         # 스트림 답변
         def generate():
             # messages = [HumanMessage(content=userQuestion)]
-            for chunk in conversational_rag_chain.stream(
+            # for chunk in conversational_rag_chain.stream(
+            for chunk in chain2.stream(
                 {"input": userQuestion},
                 config={
                     "configurable": {"session_id": chat_name}
