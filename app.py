@@ -284,38 +284,111 @@ def setPdf():
                     page = pdf_document.load_page(page_num)
                     content += page.get_text()
                 ori_chapter_contents.append(
-                    Document(
-                        metadata={"title": title},
-                        page_content=str(content),
-                    )
+                    {
+                        "title": title,
+                        "chapterId": chapterId,
+                        "page_content":str(content)
+                    }
+                    # Document(
+                    #     metadata={"title": title,"chapterId":chapterId},
+                    #     page_content=str(content),
+                    # )
                 )    
                 new_content = process_text(content)
                 chapter_contents.append(
                     Document(
-                        metadata={"title": title},
+                        metadata={"title": title,"chapterId":chapterId},
                         page_content=str(new_content),
                     )
                 )
-                # print(
-                #     "시작------------------------------------------------------------------------------------------"
-                # )
-                # print(f"title: {title}")
-                # print(f"content: {content}")
-                # print(
-                #     "끝------------------------------------------------------------------------------------------"
-                # )
+                chapterId+=1
+                
 
-            # save to db
-            Chroma.from_documents(
-                # documents=docs,
-                documents=chapter_contents,
-                embedding=embedding,
-                collection_name=f"{fileNum}.pdf",
-                client=database_client,
+            # # save to db
+            # Chroma.from_documents(
+            #     # documents=docs,
+            #     documents=chapter_contents,
+            #     embedding=embedding,
+            #     collection_name=f"{fileNum}.pdf",
+            #     client=database_client,
+            # )
+
+            # 연결 이유 추가--------------------------------------------------------------------
+            cur = mysql.connection.cursor()
+            query = (
+                "select * from api_pageconnection ap where ap.pdf_file_id = %s AND ap.similarity > 0;"
             )
-
+            cur.execute(query, [fileNum])
+            rows = cur.fetchall()
+            links=[]
+            for row in rows:
+                link = {
+                    "id":row[0],
+                    "similarity":row[1],
+                    "source":row[2],
+                    "target":row[3],
+                    "pdf_file_id":row[4],
+                    "bookmarked":row[5],
+                }
+                links.append(link)
+            # print(f"links: {links}")
+            # db 연결 종료
             
-            # --------------------------------------------------------------------
+            # for soruce in range(len(ori_chapter_contents)):
+            #     for target in range(i+1,len(ori_chapter_contents)):
+            # 프롬프트 설정
+            for link in links:
+                source= link["source"]
+                target= link["target"]
+                content1=None
+                content2=None
+                for chap in ori_chapter_contents:
+                    if chap["chapterId"]==source:
+                        title1= chap["title"]
+                        content1= chap["page_content"]
+                    elif chap["chapterId"]==target:
+                        title2= chap["title"]
+                        content2= chap["page_content"]
+                if content1!=None and content2!=None:
+                    print(f"{title1}과 {title2}의 연결 관계 조사중")
+                    system_prompt = (
+                        "당신은 인문학적 영역에 전문가인 도우미 입니다."
+                        "주어진 내용을 사용하여 질문에 답하세요."
+                        "use markdown"
+                        "\n\n"
+                    )
+                    final_prompt = ChatPromptTemplate.from_messages(
+                        [
+                            ("system", system_prompt),
+                            (
+                                "human",
+                                " \ncontent1:{content1}\n\ncontent2:{content2}\n\n {title1}과 {title2}를 읽어보고 두 내용이 어떻게 연관되어 있는지 알려줘",
+                            ),
+                        ]
+                    )
+                    # llm 및 체인 설정
+                    llm = ChatBedrock(
+                        model_id="anthropic.claude-3-haiku-20240307-v1:0",
+                        client=bedrock,
+                        streaming=True,
+                    )
+                    chain = final_prompt | llm 
+                    response = chain.invoke(
+                                {
+                                    "content1": content1, 
+                                    "content2": content2,
+                                    "title1":title1,
+                                    "title2":title2
+                                }
+                            )
+                    # print(f"연결 사유: {response.content}")
+                    query = "update api_pageconnection ap set ap.content =%s where ap.id = %s;"
+                    
+                    cur.execute(query, (response.content,link["id"] ))
+            mysql.connection.commit()
+            cur.close()
+            
+            # 요약 및 키워드 추출--------------------------------------------------------------------
             # 파서 설정
             # # pydantic_parser
             output_parser = PydanticOutputParser(pydantic_object=Summary)
@@ -365,13 +438,13 @@ def setPdf():
             i = 0
             while i<  len(ori_chapter_contents):
                 chapter = ori_chapter_contents[i]
-                print(f"{round((cnt/len(ori_chapter_contents))*100,2)}% 진행중 <<{chapter.metadata["title"]}>>")
+                print(f"{round((cnt/len(ori_chapter_contents))*100,2)}% 진행중 <<{chapter["title"]}>>")
 
                 try:
                     response = chain.invoke(
                         {
-                            "content": chapter.page_content, 
-                            "title": chapter.metadata["title"],
+                            "content": chapter["page_content"], 
+                            "title": chapter["title"],
                             "format_instructions":format_instructions
                         }
                     )
@@ -401,8 +474,8 @@ def setPdf():
                     # print(f"title: {chapter.metadata["title"]}")
                     # print(f"Summary: {summary}")
                     # print(f"Keywords: {keywords}")
-                    # print(f"chapterId: {chapterId}")
-                    rrr = cur.execute(query, (summary, list_as_string, chapterId))
+                    # print(f"chapterId: {chapter.metadata["chapterId"]}")
+                    cur.execute(query, (summary, list_as_string, chapter["chapterId"]))
                     # print(rrr)
                 except OutputParserException as e:
                     print(f"아웃풋 파서 에러")
@@ -412,7 +485,7 @@ def setPdf():
                     print(f"JSON Decode Error: {e}")
                 except KeyError as e:
                     print(f"Key Error: Missing key {e}")
-                chapterId += 1
+                # chapterId += 1
                 cnt+=1
                 i+=1
                 # print("끝----------------------------------------------------------------")
@@ -484,6 +557,7 @@ def mtest3():
             "주어진 내용을 사용하여 질문에 답하세요. 반드시 한글로 답하세요"
             "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
             "answer in detail and use markdown"
+            "출처를 적을땐 글자를 빨간색으로 강조해줘"
             # "'책' 라는 단어가 있으면 주어진 내용에서만 답을 하세요."
             "\n\n"
             "{context}"
