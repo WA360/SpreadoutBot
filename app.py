@@ -557,9 +557,9 @@ def mtest3():
             "당신은 인문학적 영역에 전문가인 도우미 입니다. 자세하게 답변하세요"
             "주어진 내용을 사용하여 질문에 답하세요. 반드시 한글로 답하세요"
             "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
-            # "마지막에 답변을 요약하세요."
+            "마지막에 답변을 요약하세요."
             # "answer in detail and use markdown"
-            "html과 css를 사용해서 답변하세요"
+            # "html과 css를 사용해서 답변하세요"
             # "'책' 라는 단어가 있으면 주어진 내용에서만 답을 하세요."
             "\n\n"
             "{context}"
@@ -638,27 +638,27 @@ def mtest3():
 
         
         # # # 그냥 답변
-        res = conversational_rag_chain.invoke(
-            {"input": userQuestion},
-            config={
-                "configurable": {"session_id": chat_name}
-            },  # constructs a key "abc123" in `store`.
-        )["answer"]
+        # res = conversational_rag_chain.invoke(
+        #     {"input": userQuestion},
+        #     config={
+        #         "configurable": {"session_id": chat_name}
+        #     },  # constructs a key "abc123" in `store`.
+        # )["answer"]
 
-        result = []
-        for message in store[chat_name].messages:
-            if isinstance(message, AIMessage):
-                prefix = "AI"
-            else:
-                prefix = "User"
-            result.append({prefix: f"{message.content}\n"})
+        # result = []
+        # for message in store[chat_name].messages:
+        #     if isinstance(message, AIMessage):
+        #         prefix = "AI"
+        #     else:
+        #         prefix = "User"
+        #     result.append({prefix: f"{message.content}\n"})
 
-        # 저장소 출력
-        # updateresult = updateHistory(store[chat_name], chatNum)
-        # print(updateresult)
-        print(store[chat_name])
-        return jsonify({"result": res})
-        return jsonify({"result": result})
+        # # 저장소 출력
+        # # updateresult = updateHistory(store[chat_name], chatNum)
+        # # print(updateresult)
+        # print(store[chat_name])
+        # return jsonify({"result": res})
+        # return jsonify({"result": result})
 
         # 스트림 답변
         def generate():
