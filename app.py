@@ -97,6 +97,7 @@ llm = None  # llm
 retriever = None  # 검색기
 conversation = None  # 채팅 버퍼
 store = {}  # 채팅 기록?
+embedding_book =[]
 # mysql = None  # mysql 디비
 app.config["MYSQL_HOST"] = mysql_host
 app.config["MYSQL_USER"] = mysql_user
@@ -204,306 +205,313 @@ def setLLM():
 
 @app.route("/save/pdf", methods=["POST"])
 def setPdf():
+    global embedding_book
     data = request.get_json()
     fileName = data["fileName"]
     fileNum = data["fileNum"]
     chapterId = data["chapterId"]
     bucket_name = s3_bucket_name
     download_path = f"./pdfs/{fileName}"
-
-    # file download from S3
-    s3 = boto3.client(
-        "s3",
-        aws_access_key_id=s3_access_key_id,
-        aws_secret_access_key=s3_secret_access_key,
-        region_name=s3_region,
-    )
-
-    try:
-        # PDF 파일 다운로드
-        s3.download_file(bucket_name, fileName, download_path)
-        print(f"Downloaded {fileName} from bucket {bucket_name} to {download_path}")
-    except Exception as e:
-        print(f"Error downloading file: {e}")
-    print("파일 다운로드함")
-    # pdf load
-    def check_file_exists_in_pdfs(filename):
-        return os.path.isfile(f"./pdfs/{filename}")
-    is_file = check_file_exists_in_pdfs(fileName)
-    if is_file:
-        print("파일 다운 성공")
-        # fileName = "jotcoding-1-25.pdf"
-        # fileNum = 18
-        # fileName = "jotcoding.pdf"
-        download_path = f"./pdfs/{fileName}"
-        pdf_document = fitz.open(download_path)
-        # db 연결
-        chroma_db = Chroma(
-            client=database_client,
-            collection_name=f"{fileNum}.pdf",
-            embedding_function=embedding,
-        )
-        print(f"{chroma_db._collection.count()}개 있음")
-        if chroma_db._collection.count() == 0:
-            # 목차 읽기
-            toc = pdf_document.get_toc()
-
-            # 각 단원의 시작 및 끝 페이지를 저장할 리스트
-            chapters = []
-
-            print(f"목차 길이: {len(toc)}")
-            for i in range(len(toc) - 1):
-                current_chapter = toc[i]
-                next_chapter = toc[i + 1]
-
-                chapter_level = current_chapter[0]
-                chapter_title = current_chapter[1]
-                start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
-                end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
-                chapters.append((chapter_title, start_page, end_page))
-                print(chapter_title, start_page, end_page)
-            # 마지막 챕터 추가
-            last_chapter = toc[-1]
-            chapter_title = last_chapter[1]
-            start_page = last_chapter[2] - 1
-            end_page = pdf_document.page_count - 1
-            chapters.append((chapter_title, start_page, end_page))
-            print(f"마지막 챕터 {chapter_title}, {start_page}, {end_page}")
-
-            # # 각 단원의 내용을 배열에 저장
-            chapter_contents = []
-            ori_chapter_contents = []
-            print("----------------------내용 추출 시작-----------------------------")
-            print(f"챕터 길이: {len(chapters)}")
-            for chapter in chapters:
-                title, start_page, end_page = chapter
-                content = ""
-                print(f"<<{title}>> 내용 추출 진행중")
-                if start_page > end_page:
-                    end_page = start_page
-                for page_num in range(start_page, end_page + 1):
-                    page = pdf_document.load_page(page_num)
-                    content += page.get_text()
-                ori_chapter_contents.append(
-                    {
-                        "title": title,
-                        "chapterId": chapterId,
-                        "page_content":str(content)
-                    }
-                    # Document(
-                    #     metadata={"title": title,"chapterId":chapterId},
-                    #     page_content=str(content),
-                    # )
-                )    
-                new_content = process_text(content)
-                chapter_contents.append(
-                    Document(
-                        metadata={"title": title,"chapterId":chapterId},
-                        page_content=str(new_content),
-                    )
-                )
-                chapterId+=1
-                
-
-            # # save to db
-            # Chroma.from_documents(
-            #     # documents=docs,
-            #     documents=chapter_contents,
-            #     embedding=embedding,
-            #     collection_name=f"{fileNum}.pdf",
-            #     client=database_client,
-            # )
-
-            # 연결 이유 추가--------------------------------------------------------------------
-            cur = mysql.connection.cursor()
-            query = (
-                "select * from api_pageconnection ap where ap.pdf_file_id = %s AND ap.similarity > 0;"
-            )
-            cur.execute(query, [fileNum])
-            rows = cur.fetchall()
-            links=[]
-            for row in rows:
-                link = {
-                    "id":row[0],
-                    "similarity":row[1],
-                    "source":row[2],
-                    "target":row[3],
-                    "pdf_file_id":row[4],
-                    "bookmarked":row[5],
-                }
-                links.append(link)
-            # print(f"links: {links}")
-            # db 연결 종료
-            
-            # for soruce in range(len(ori_chapter_contents)):
-            #     for target in range(i+1,len(ori_chapter_contents)):
-            # 프롬프트 설정
-            for link in links:
-                source= link["source"]
-                target= link["target"]
-                content1=None
-                content2=None
-                for chap in ori_chapter_contents:
-                    if chap["chapterId"]==source:
-                        title1= chap["title"]
-                        content1= chap["page_content"]
-                    elif chap["chapterId"]==target:
-                        title2= chap["title"]
-                        content2= chap["page_content"]
-                if content1!=None and content2!=None:
-                    print(f"{title1}과 {title2}의 연결 관계 조사중")
-                    system_prompt = (
-                        "당신은 인문학적 영역에 전문가인 도우미 입니다."
-                        "주어진 내용을 사용하여 질문에 답하세요."
-                        "use markdown"
-                        "\n\n"
-                    )
-                    final_prompt = ChatPromptTemplate.from_messages(
-                        [
-                            ("system", system_prompt),
-                            (
-                                "human",
-                                " \ncontent1:{content1}\n\ncontent2:{content2}\n\n {title1}과 {title2}를 읽어보고 두 내용이 어떻게 연관되어 있는지 알려줘",
-                            ),
-                        ]
-                    )
-                    # llm 및 체인 설정
-                    llm = ChatBedrock(
-                        model_id="anthropic.claude-3-haiku-20240307-v1:0",
-                        client=bedrock,
-                        streaming=True,
-                    )
-                    chain = final_prompt | llm 
-                    response = chain.invoke(
-                                {
-                                    "content1": content1, 
-                                    "content2": content2,
-                                    "title1":title1,
-                                    "title2":title2
-                                }
-                            )
-                    # print(f"연결 사유: {response.content}")
-                    query = "update api_pageconnection ap set ap.content =%s where ap.id = %s;"
-                    
-                    cur.execute(query, (response.content,link["id"] ))
-            mysql.connection.commit()
-            cur.close()
-            
-            # 요약 및 키워드 추출--------------------------------------------------------------------
-            # 파서 설정
-            # # pydantic_parser
-            output_parser = PydanticOutputParser(pydantic_object=Summary)
-            # StructuredOutputParser
-            # response_schemas = [
-            #     ResponseSchema(name="summary", description="Summarize the given content in Markdown format in 300 characters or less."),
-            #     ResponseSchema(
-            #         name="keywords",
-            #         description="List of 5 important keywords for given content",
-            #     ),
-            # ]
-            # output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
-            format_instructions =output_parser.get_format_instructions()
-            # 프롬프트 설정
-            system_prompt = (
-                "당신은 인문학적 영역에 전문가인 도우미 입니다."
-                "주어진 내용을 사용하여 질문에 답하세요. summary,keywords를 제외하고는 한글로 답하세요"
-                "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
-                "반드시 json 포맷으로 응답하세요."
-                "\n\n"
-                "{format_instructions}"
-            )
-            final_prompt = ChatPromptTemplate.from_messages(
-                [
-                    ("system", system_prompt),
-                    (
-                        "human",
-                        " \n\n {content}\n \n위의 내용 중에서 {title}이 가리키는 부분을 찾아 내용을 요약하고 중요 키워드를 5개 뽑아주세요.반드시 json 포맷으로 응답하세요, key는 summary와 keywords 를 사용하세요.",
-                    ),
-                ]
-            )
-            # llm 및 체인 설정
-            llm = ChatBedrock(
-                model_id="anthropic.claude-3-haiku-20240307-v1:0",
-                client=bedrock,
-                streaming=True,
-            )
-            chain = final_prompt | llm | output_parser
-            # --------------------------------------------------------------------------
-        
-            cur = mysql.connection.cursor()
-            query = (
-                "update api_chapter ac set ac.summary =%s ,ac.keywords=%s where ac.id=%s"
-            )
-            print("----------------------요약 및 키워드 추출 시작---------------------------")
-            cnt=1
-            i = 0
-            while i<  len(ori_chapter_contents):
-                chapter = ori_chapter_contents[i]
-                print(f"{round((cnt/len(ori_chapter_contents))*100,2)}% 진행중 <<{chapter["title"]}>>")
-
-                try:
-                    response = chain.invoke(
-                        {
-                            "content": chapter["page_content"], 
-                            "title": chapter["title"],
-                            "format_instructions":format_instructions
-                        }
-                    )
-                    # print(response)
-                    summary_match = re.search(r"summary='(.*?)' keywords=", str(response), re.DOTALL)
-                    keywords_match = re.search(r"keywords=\[(.*?)\]", str(response), re.DOTALL)
-                    if summary_match and keywords_match:
-                        summary = summary_match.group(1)
-                        keywords = keywords_match.group(1).replace("'", "").split(", ")
-
-                        # JSON 객체 생성
-                        data = {
-                            "summary": summary,
-                            "keywords": keywords
-                        }
-
-                        # JSON 객체를 문자열로 변환
-                        response = json.dumps(data, ensure_ascii=False, indent=4)
-                    # print(response)
-                    if is_json(response)==False:
-                        print("json 아니라서 다시함")
-                        continue
-                    response = json.loads(response)
-                    summary = response["summary"]
-                    keywords = response["keywords"]
-                    list_as_string = json.dumps(keywords, ensure_ascii=False)
-                    # print(f"title: {chapter.metadata["title"]}")
-                    # print(f"Summary: {summary}")
-                    # print(f"Keywords: {keywords}")
-                    # print(f"chapterId: {chapter.metadata["chapterId"]}")
-                    cur.execute(query, (summary, list_as_string, chapter["chapterId"]))
-                    # print(rrr)
-                except OutputParserException as e:
-                    print(f"아웃풋 파서 에러")
-                    print(f"OutputParserException: {e}")
-                    continue
-                except json.JSONDecodeError as e:
-                    print(f"JSON Decode Error: {e}")
-                except KeyError as e:
-                    print(f"Key Error: Missing key {e}")
-                # chapterId += 1
-                cnt+=1
-                i+=1
-                # print("끝----------------------------------------------------------------")
-            mysql.connection.commit()
-            # db 연결 종료
-            cur.close()
-            # pdf 종료
-            pdf_document.close()
-            
-            os.remove(download_path)
-            return jsonify({"result": "upload success"})
-        else:
-            pdf_document.close()
-            os.remove(download_path)
-            return jsonify({"result": "file already exists"})
+    
+    if fileName in embedding_book:
+        return jsonify({"result": "이미 분석중인 파일"})
     else:
-        return jsonify({"result": "not found file"})
+        embedding_book.append(fileName)
+        # file download from S3
+        s3 = boto3.client(
+            "s3",
+            aws_access_key_id=s3_access_key_id,
+            aws_secret_access_key=s3_secret_access_key,
+            region_name=s3_region,
+        )
+
+        try:
+            # PDF 파일 다운로드
+            s3.download_file(bucket_name, fileName, download_path)
+            print(f"Downloaded {fileName} from bucket {bucket_name} to {download_path}")
+        except Exception as e:
+            print(f"Error downloading file: {e}")
+        print("파일 다운로드함")
+        # pdf load
+        def check_file_exists_in_pdfs(filename):
+            return os.path.isfile(f"./pdfs/{filename}")
+        is_file = check_file_exists_in_pdfs(fileName)
+        if is_file:
+            print("파일 다운 성공")
+            # fileName = "jotcoding-1-25.pdf"
+            # fileNum = 18
+            # fileName = "jotcoding.pdf"
+            download_path = f"./pdfs/{fileName}"
+            pdf_document = fitz.open(download_path)
+            # db 연결
+            chroma_db = Chroma(
+                client=database_client,
+                collection_name=f"{fileNum}.pdf",
+                embedding_function=embedding,
+            )
+            print(f"{chroma_db._collection.count()}개 있음")
+            if chroma_db._collection.count() == 0:
+                # 목차 읽기
+                toc = pdf_document.get_toc()
+
+                # 각 단원의 시작 및 끝 페이지를 저장할 리스트
+                chapters = []
+
+                print(f"목차 길이: {len(toc)}")
+                for i in range(len(toc) - 1):
+                    current_chapter = toc[i]
+                    next_chapter = toc[i + 1]
+
+                    chapter_level = current_chapter[0]
+                    chapter_title = current_chapter[1]
+                    start_page = current_chapter[2] - 1  # 페이지 번호는 0부터 시작
+                    end_page = next_chapter[2] - 2  # 다음 챕터 시작 전까지 포함
+                    chapters.append((chapter_title, start_page, end_page))
+                    print(chapter_title, start_page, end_page)
+                # 마지막 챕터 추가
+                last_chapter = toc[-1]
+                chapter_title = last_chapter[1]
+                start_page = last_chapter[2] - 1
+                end_page = pdf_document.page_count - 1
+                chapters.append((chapter_title, start_page, end_page))
+                print(f"마지막 챕터 {chapter_title}, {start_page}, {end_page}")
+
+                # # 각 단원의 내용을 배열에 저장
+                chapter_contents = []
+                ori_chapter_contents = []
+                print("----------------------내용 추출 시작-----------------------------")
+                print(f"챕터 길이: {len(chapters)}")
+                for chapter in chapters:
+                    title, start_page, end_page = chapter
+                    content = ""
+                    print(f"<<{title}>> 내용 추출 진행중")
+                    if start_page > end_page:
+                        end_page = start_page
+                    for page_num in range(start_page, end_page + 1):
+                        page = pdf_document.load_page(page_num)
+                        content += page.get_text()
+                    ori_chapter_contents.append(
+                        {
+                            "title": title,
+                            "chapterId": chapterId,
+                            "page_content":str(content)
+                        }
+                        # Document(
+                        #     metadata={"title": title,"chapterId":chapterId},
+                        #     page_content=str(content),
+                        # )
+                    )    
+                    new_content = process_text(content)
+                    chapter_contents.append(
+                        Document(
+                            metadata={"title": title,"chapterId":chapterId},
+                            page_content=str(new_content),
+                        )
+                    )
+                    chapterId+=1
+                    
+
+                # # save to db
+                # Chroma.from_documents(
+                #     # documents=docs,
+                #     documents=chapter_contents,
+                #     embedding=embedding,
+                #     collection_name=f"{fileNum}.pdf",
+                #     client=database_client,
+                # )
+
+                # 연결 이유 추가--------------------------------------------------------------------
+                cur = mysql.connection.cursor()
+                query = (
+                    "select * from api_pageconnection ap where ap.pdf_file_id = %s AND ap.similarity > 0;"
+                )
+                cur.execute(query, [fileNum])
+                rows = cur.fetchall()
+                links=[]
+                for row in rows:
+                    link = {
+                        "id":row[0],
+                        "similarity":row[1],
+                        "source":row[2],
+                        "target":row[3],
+                        "pdf_file_id":row[4],
+                        "bookmarked":row[5],
+                    }
+                    links.append(link)
+                # print(f"links: {links}")
+                # db 연결 종료
+                
+                # for soruce in range(len(ori_chapter_contents)):
+                #     for target in range(i+1,len(ori_chapter_contents)):
+                # 프롬프트 설정
+                for link in links:
+                    source= link["source"]
+                    target= link["target"]
+                    content1=None
+                    content2=None
+                    for chap in ori_chapter_contents:
+                        if chap["chapterId"]==source:
+                            title1= chap["title"]
+                            content1= chap["page_content"]
+                        elif chap["chapterId"]==target:
+                            title2= chap["title"]
+                            content2= chap["page_content"]
+                    if content1!=None and content2!=None:
+                        print(f"{title1}과 {title2}의 연결 관계 조사중")
+                        system_prompt = (
+                            "당신은 인문학적 영역에 전문가인 도우미 입니다."
+                            "주어진 내용을 사용하여 질문에 답하세요."
+                            "use markdown"
+                            "\n\n"
+                        )
+                        final_prompt = ChatPromptTemplate.from_messages(
+                            [
+                                ("system", system_prompt),
+                                (
+                                    "human",
+                                    " \ncontent1:{content1}\n\ncontent2:{content2}\n\n {title1}과 {title2}를 읽어보고 두 내용이 어떻게 연관되어 있는지 알려줘",
+                                ),
+                            ]
+                        )
+                        # llm 및 체인 설정
+                        llm = ChatBedrock(
+                            model_id="anthropic.claude-3-haiku-20240307-v1:0",
+                            client=bedrock,
+                            streaming=True,
+                        )
+                        chain = final_prompt | llm 
+                        response = chain.invoke(
+                                    {
+                                        "content1": content1, 
+                                        "content2": content2,
+                                        "title1":title1,
+                                        "title2":title2
+                                    }
+                                )
+                        # print(f"연결 사유: {response.content}")
+                        query = "update api_pageconnection ap set ap.content =%s where ap.id = %s;"
+                        
+                        cur.execute(query, (response.content,link["id"] ))
+                mysql.connection.commit()
+                cur.close()
+                
+                # 요약 및 키워드 추출--------------------------------------------------------------------
+                # 파서 설정
+                # # pydantic_parser
+                output_parser = PydanticOutputParser(pydantic_object=Summary)
+                # StructuredOutputParser
+                # response_schemas = [
+                #     ResponseSchema(name="summary", description="Summarize the given content in Markdown format in 300 characters or less."),
+                #     ResponseSchema(
+                #         name="keywords",
+                #         description="List of 5 important keywords for given content",
+                #     ),
+                # ]
+                # output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
+                format_instructions =output_parser.get_format_instructions()
+                # 프롬프트 설정
+                system_prompt = (
+                    "당신은 인문학적 영역에 전문가인 도우미 입니다."
+                    "주어진 내용을 사용하여 질문에 답하세요. summary,keywords를 제외하고는 한글로 답하세요"
+                    "주어진 정보에 대한 답변이 없을 경우, 알고 있는 대로 답변해 주십시오."
+                    "반드시 json 포맷으로 응답하세요."
+                    "\n\n"
+                    "{format_instructions}"
+                )
+                final_prompt = ChatPromptTemplate.from_messages(
+                    [
+                        ("system", system_prompt),
+                        (
+                            "human",
+                            " \n\n {content}\n \n위의 내용 중에서 {title}이 가리키는 부분을 찾아 내용을 요약하고 중요 키워드를 5개 뽑아주세요.반드시 json 포맷으로 응답하세요, key는 summary와 keywords 를 사용하세요.",
+                        ),
+                    ]
+                )
+                # llm 및 체인 설정
+                llm = ChatBedrock(
+                    model_id="anthropic.claude-3-haiku-20240307-v1:0",
+                    client=bedrock,
+                    streaming=True,
+                )
+                chain = final_prompt | llm | output_parser
+                # --------------------------------------------------------------------------
+            
+                cur = mysql.connection.cursor()
+                query = (
+                    "update api_chapter ac set ac.summary =%s ,ac.keywords=%s where ac.id=%s"
+                )
+                print("----------------------요약 및 키워드 추출 시작---------------------------")
+                cnt=1
+                i = 0
+                while i<  len(ori_chapter_contents):
+                    chapter = ori_chapter_contents[i]
+                    print(f"{round((cnt/len(ori_chapter_contents))*100,2)}% 진행중 <<{chapter["title"]}>>")
+
+                    try:
+                        response = chain.invoke(
+                            {
+                                "content": chapter["page_content"], 
+                                "title": chapter["title"],
+                                "format_instructions":format_instructions
+                            }
+                        )
+                        # print(response)
+                        summary_match = re.search(r"summary='(.*?)' keywords=", str(response), re.DOTALL)
+                        keywords_match = re.search(r"keywords=\[(.*?)\]", str(response), re.DOTALL)
+                        if summary_match and keywords_match:
+                            summary = summary_match.group(1)
+                            keywords = keywords_match.group(1).replace("'", "").split(", ")
+
+                            # JSON 객체 생성
+                            data = {
+                                "summary": summary,
+                                "keywords": keywords
+                            }
+
+                            # JSON 객체를 문자열로 변환
+                            response = json.dumps(data, ensure_ascii=False, indent=4)
+                        # print(response)
+                        if is_json(response)==False:
+                            print("json 아니라서 다시함")
+                            continue
+                        response = json.loads(response)
+                        summary = response["summary"]
+                        keywords = response["keywords"]
+                        list_as_string = json.dumps(keywords, ensure_ascii=False)
+                        # print(f"title: {chapter.metadata["title"]}")
+                        # print(f"Summary: {summary}")
+                        # print(f"Keywords: {keywords}")
+                        # print(f"chapterId: {chapter.metadata["chapterId"]}")
+                        cur.execute(query, (summary, list_as_string, chapter["chapterId"]))
+                        # print(rrr)
+                    except OutputParserException as e:
+                        print(f"아웃풋 파서 에러")
+                        print(f"OutputParserException: {e}")
+                        continue
+                    except json.JSONDecodeError as e:
+                        print(f"JSON Decode Error: {e}")
+                    except KeyError as e:
+                        print(f"Key Error: Missing key {e}")
+                    # chapterId += 1
+                    cnt+=1
+                    i+=1
+                    # print("끝----------------------------------------------------------------")
+                mysql.connection.commit()
+                # db 연결 종료
+                cur.close()
+                # pdf 종료
+                pdf_document.close()
+                embedding_book.remove(fileName)
+                os.remove(download_path)
+                return jsonify({"result": "upload success"})
+            else:
+                pdf_document.close()
+                embedding_book.remove(fileName)
+                os.remove(download_path)
+                return jsonify({"result": "file already exists"})
+        else:
+            embedding_book.remove(fileName)
+            return jsonify({"result": "not found file"})
 
 
 @app.route("/test", methods=["GET"])
@@ -528,7 +536,7 @@ def mtest3():
             collection_name=f"{fileNum}.pdf",
             embedding_function=embedding,
         )
-        retriever = chroma_db.as_retriever(search_kwargs={"k": 30})
+        retriever = chroma_db.as_retriever(search_kwargs={"k": 20})
 
         # 히스토리 프롬프트
         contextualize_q_system_prompt = (
@@ -638,27 +646,27 @@ def mtest3():
 
         
         # # # 그냥 답변
-        # res = conversational_rag_chain.invoke(
-        #     {"input": userQuestion},
-        #     config={
-        #         "configurable": {"session_id": chat_name}
-        #     },  # constructs a key "abc123" in `store`.
-        # )["answer"]
+        res = conversational_rag_chain.invoke(
+            {"input": userQuestion},
+            config={
+                "configurable": {"session_id": chat_name}
+            },  # constructs a key "abc123" in `store`.
+        )["answer"]
 
-        # result = []
-        # for message in store[chat_name].messages:
-        #     if isinstance(message, AIMessage):
-        #         prefix = "AI"
-        #     else:
-        #         prefix = "User"
-        #     result.append({prefix: f"{message.content}\n"})
+        result = []
+        for message in store[chat_name].messages:
+            if isinstance(message, AIMessage):
+                prefix = "AI"
+            else:
+                prefix = "User"
+            result.append({prefix: f"{message.content}\n"})
 
-        # # 저장소 출력
-        # # updateresult = updateHistory(store[chat_name], chatNum)
-        # # print(updateresult)
-        # print(store[chat_name])
-        # return jsonify({"result": res})
-        # return jsonify({"result": result})
+        # 저장소 출력
+        # updateresult = updateHistory(store[chat_name], chatNum)
+        # print(updateresult)
+        print(store[chat_name])
+        return jsonify({"result": res})
+        return jsonify({"result": result})
 
         # 스트림 답변
         def generate():
