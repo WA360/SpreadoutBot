@@ -312,13 +312,13 @@ def setPdf():
                     
 
                 # # save to db
-                # Chroma.from_documents(
-                #     # documents=docs,
-                #     documents=chapter_contents,
-                #     embedding=embedding,
-                #     collection_name=f"{fileNum}.pdf",
-                #     client=database_client,
-                # )
+                Chroma.from_documents(
+                    # documents=docs,
+                    documents=chapter_contents,
+                    embedding=embedding,
+                    collection_name=f"{fileNum}.pdf",
+                    client=database_client,
+                )
 
                 # 연결 이유 추가--------------------------------------------------------------------
                 cur = mysql.connection.cursor()
@@ -646,27 +646,27 @@ def mtest3():
 
         
         # # # 그냥 답변
-        res = conversational_rag_chain.invoke(
-            {"input": userQuestion},
-            config={
-                "configurable": {"session_id": chat_name}
-            },  # constructs a key "abc123" in `store`.
-        )["answer"]
+        # res = conversational_rag_chain.invoke(
+        #     {"input": userQuestion},
+        #     config={
+        #         "configurable": {"session_id": chat_name}
+        #     },  # constructs a key "abc123" in `store`.
+        # )["answer"]
 
-        result = []
-        for message in store[chat_name].messages:
-            if isinstance(message, AIMessage):
-                prefix = "AI"
-            else:
-                prefix = "User"
-            result.append({prefix: f"{message.content}\n"})
+        # result = []
+        # for message in store[chat_name].messages:
+        #     if isinstance(message, AIMessage):
+        #         prefix = "AI"
+        #     else:
+        #         prefix = "User"
+        #     result.append({prefix: f"{message.content}\n"})
 
-        # 저장소 출력
-        # updateresult = updateHistory(store[chat_name], chatNum)
-        # print(updateresult)
-        print(store[chat_name])
-        return jsonify({"result": res})
-        return jsonify({"result": result})
+        # # 저장소 출력
+        # # updateresult = updateHistory(store[chat_name], chatNum)
+        # # print(updateresult)
+        # print(store[chat_name])
+        # return jsonify({"result": res})
+        # return jsonify({"result": result})
 
         # 스트림 답변
         def generate():
