@@ -668,7 +668,7 @@ def mtest3():
         # return jsonify({"result": res})
         # return jsonify({"result": result})
 
-        # 스트림 답변
+        # 스트림 답변 
         def generate():
             # messages = [HumanMessage(content=userQuestion)]
             # for chunk in conversational_rag_chain.stream(
